@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Daily Instagram Scheduler</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="mark">AI</div>
+        <button title="Dashboard" class="nav active">D</button>
+        <button title="Calendar" class="nav">C</button>
+        <button title="Media" class="nav">M</button>
+        <button title="Settings" class="nav">S</button>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">AI Influencer Agent</p>
+            <h1>Daily Instagram Scheduler</h1>
+          </div>
+          <div class="top-actions">
+            <a id="downloadAll" class="ghost-button link-button" href="/api/download-all">Download All</a>
+            <button id="runDue" class="ghost-button">Run Due Posts</button>
+          </div>
+        </header>
+
+        <section class="stats-grid">
+          <article class="metric">
+            <span>Scheduled</span>
+            <strong id="scheduledCount">0</strong>
+          </article>
+          <article class="metric">
+            <span>Published</span>
+            <strong id="publishedCount">0</strong>
+          </article>
+          <article class="metric">
+            <span>Failed</span>
+            <strong id="failedCount">0</strong>
+          </article>
+          <article class="metric">
+            <span>Next Post</span>
+            <strong id="nextPost">--</strong>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <form id="planForm" class="panel composer">
+            <div class="panel-heading">
+              <h2>AI Agent Plan</h2>
+              <p>Let the agent plan, create, review, and schedule your branded posts.</p>
+            </div>
+            <label class="toggle">
+              <input name="agentMode" type="checkbox" checked />
+              <span>Agent Mode: strategy, daily missions, and quality review</span>
+            </label>
+            <label>
+              Agent Goal
+              <textarea name="agentGoal" rows="4" placeholder="Optional: tell the agent what outcome to optimize for, such as saves, self-worth community growth, premium brand voice, or daily engagement."></textarea>
+            </label>
+            <label>
+              Category
+              <input name="category" value="Self Worth" required />
+            </label>
+            <label>
+              Creative Prompt
+              <textarea name="creativePrompt" rows="6" placeholder="Optional: paste a full ChatGPT-style prompt. Example: Create premium Instagram posts for women healing from emotional burnout, with elegant magazine styling, poetic quotes, and a confident feminine voice."></textarea>
+            </label>
+            <label>
+              Quote Description
+              <textarea name="quoteDescription" rows="4" placeholder="Optional: describe the exact feeling, message, audience, or situation for the quote."></textarea>
+            </label>
+            <label>
+              Background / Post Style
+              <textarea name="backgroundDescription" rows="4" placeholder="Optional: describe the background, colors, outfit, location, mood, or design style."></textarea>
+            </label>
+            <div class="two-col">
+              <label>
+                Creator Name
+                <input name="creatorName" value="Rini" required />
+              </label>
+              <label>
+                Instagram Handle
+                <input name="instagramHandle" value="@getholisticallyfitwithrini" required />
+              </label>
+            </div>
+            <label>
+              Upload Portrait or Brand Image
+              <input id="imageUpload" name="imageUpload" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <div id="uploadPreview" class="upload-preview">
+              <span>No image uploaded</span>
+            </div>
+            <div class="two-col">
+              <label>
+                Days
+                <input name="days" type="number" min="1" max="365" value="30" required />
+              </label>
+              <label>
+                Post Time
+                <input name="postTime" type="time" value="09:00" required />
+              </label>
+            </div>
+            <div class="two-col">
+              <label>
+                Start Date
+                <input name="startDate" type="date" required />
+              </label>
+              <label>
+                Tone
+                <select name="tone">
+                  <option>Inspirational</option>
+                  <option>Thought-provoking</option>
+                  <option>Gentle</option>
+                  <option>Bold</option>
+                  <option>Elegant</option>
+                </select>
+              </label>
+            </div>
+            <label class="toggle">
+              <input name="animation" type="checkbox" />
+              <span>Animate due posts with Grok when possible</span>
+            </label>
+            <button class="primary-button" type="submit">Generate Schedule</button>
+            <p id="formStatus" class="status-line"></p>
+          </form>
+
+          <section class="panel preview-panel">
+            <div class="panel-heading">
+              <h2>Selected Post</h2>
+              <p>Download, regenerate, create Grok media, animate, or publish manually.</p>
+            </div>
+            <div id="selectedPost" class="empty-state">Choose a post from the calendar.</div>
+          </section>
+        </section>
+
+        <section class="panel calendar-panel">
+          <div class="panel-heading row">
+            <div>
+              <h2>Content Calendar</h2>
+              <p>Click any scheduled card to inspect or publish it.</p>
+            </div>
+            <button id="refresh" class="ghost-button">Refresh</button>
+          </div>
+          <div id="calendar" class="calendar"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
