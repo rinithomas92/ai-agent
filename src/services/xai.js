@@ -1,9 +1,11 @@
 import OpenAI from 'openai';
+import { useDemoImages } from '../runtimeMode.js';
 
 export async function generateGrokImage(post) {
-  if (!process.env.XAI_API_KEY) {
-    return { url: post.imageUrl, demo: true };
+  if (useDemoImages()) {
+    return { url: post.imageUrl || 'http://localhost:5177/generated/demo.svg', demo: true };
   }
+
 
   const client = new OpenAI({
     apiKey: process.env.XAI_API_KEY,
@@ -30,9 +32,10 @@ export async function generateGrokImage(post) {
 }
 
 export async function animateWithGrok(post) {
-  if (!process.env.XAI_API_KEY) {
-    return { url: null, demo: true };
+  if (useDemoImages()) {
+    return { url: post.imageUrl || 'http://localhost:5177/generated/demo.svg', demo: true };
   }
+
 
   const imageUrl = post.grokImageUrl || post.imageUrl;
   const response = await fetch('https://api.x.ai/v1/videos/generations', {

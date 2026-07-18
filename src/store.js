@@ -24,7 +24,10 @@ function writeJson(file, value) {
 }
 
 export function getPosts() {
-  return readJson(postsFile, []);
+  return readJson(postsFile, []).map((post) => ({
+    ...post,
+    status: post.status === 'published-demo' ? 'published' : post.status
+  }));
 }
 
 export function savePosts(posts) {
@@ -35,8 +38,10 @@ export function getSettings() {
   return readJson(settingsFile, {
     category: 'Self Worth',
     days: 30,
+    postsPerDay: 1,
     tone: 'Inspirational',
     postTime: process.env.DEFAULT_POST_TIME || '09:00',
+    postTimes: [process.env.DEFAULT_POST_TIME || '09:00'],
     animation: false
   });
 }

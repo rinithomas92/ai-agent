@@ -1,6 +1,12 @@
+import { useDemoPublishing } from '../runtimeMode.js';
+
 const graphVersion = process.env.INSTAGRAM_GRAPH_VERSION || 'v23.0';
 
 export async function publishToInstagram(post) {
+  if (useDemoPublishing()) {
+    return { mediaId: `DEMO_${Math.floor(100000 + Math.random() * 900000)}`, demo: true };
+  }
+
   const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
   const igUserId = process.env.INSTAGRAM_IG_USER_ID;
   if (!accessToken || !igUserId) {
@@ -58,4 +64,17 @@ async function waitForContainer(containerId) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
   throw new Error('Instagram media container did not finish in time');
+}
+
+export async function validateCredentials() {
+  if (useDemoPublishing()) {
+    return { username: 'demo_user', demo: true };
+  }
+  const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+  const igUserId = process.env.INSTAGRAM_IG_USER_ID;
+  if (!accessToken || !igUserId) {
+    throw new Error('Missing INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_IG_USER_ID');
+  }
+  const data = await graphGet(igUserId, { fields: 'id,username' });
+  return { username: data.username };
 }

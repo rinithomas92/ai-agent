@@ -66,7 +66,8 @@ This version stores schedules in `data/posts.json` and uploaded/generated files 
 
 ## What it does
 
-- Builds a dynamic schedule for any number of days.
+- Builds a dynamic schedule using separate **Number of Days** and **Posts per Day** controls.
+- Supports a different posting time for every daily post. Total posts are calculated as `days × posts per day`.
 - Uses OpenAI to generate a quote, caption, and hashtags for your category.
 - Uploads a portrait or brand image and renders branded quote-card SVGs.
 - Adds creator name and Instagram handle to each post graphic.
@@ -74,6 +75,20 @@ This version stores schedules in `data/posts.json` and uploaded/generated files 
 - Optionally uses xAI/Grok Imagine for image generation or image-to-video animation.
 - Publishes daily when a scheduled post is due.
 - Keeps local state in `data/posts.json` and generated media in `public/generated`.
+
+## Multiple posts per day
+
+The planning form now separates campaign duration from daily posting frequency:
+
+```text
+Number of Days: 3
+Posts per Day: 2
+Post 1 Time: 09:00
+Post 2 Time: 18:00
+Total: 6 scheduled posts
+```
+
+Each daily posting time can be changed independently. Existing requests that only send `days` and `postTime` remain compatible and continue to create one post per day.
 
 ## Instagram setup notes
 
@@ -86,3 +101,18 @@ Local preview SVGs are for planning and review. Instagram Graph expects publicly
 - OpenAI Responses API and model docs: https://developers.openai.com/api/docs
 - xAI Grok Imagine image/video docs: https://docs.x.ai/developers/model-capabilities/imagine
 - Meta Instagram content publishing: https://developers.facebook.com/docs/instagram-platform/content-publishing/
+
+## Automatic Demo fallback
+
+The application now continues working when API credentials are blank.
+
+- `DEMO_MODE=true` forces the complete application to remain in Demo Mode and prevents external API calls.
+- `DEMO_MODE=auto` or `DEMO_MODE=false` uses OpenAI, xAI, and Instagram only when the matching credentials are configured.
+- When a credential is missing, that part of the application automatically uses its existing demo behaviour instead of showing a missing-key error.
+
+Examples:
+
+- No keys: local demo content, SVG creative backgrounds, hashtag regeneration, and simulated Instagram publishing.
+- Demo publishing uses the normal visible status `published`; simulation details remain stored internally in `publishingMode: "demo"`.
+- Only `OPENAI_API_KEY`: live text generation with local SVG images and simulated publishing.
+- All credentials: live content, live image generation, and live Instagram publishing.

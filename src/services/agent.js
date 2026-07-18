@@ -1,9 +1,10 @@
 import OpenAI from 'openai';
+import { useDemoContent } from '../runtimeMode.js';
 
 export async function createAgentStrategy(input) {
   if (!input.agentMode) return null;
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (useDemoContent()) {
     return fallbackStrategy(input);
   }
 
