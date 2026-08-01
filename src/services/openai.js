@@ -1,4 +1,7 @@
 import OpenAI from 'openai';
+import { getDemoContent } from '../data/demoContent.js';
+import { getDemoHashtags, normalizeHashtags } from '../data/hashtags.js';
+import { useDemoContent } from '../runtimeMode.js';
 
 const fallbackQuotes = [
   'Your worth is not waiting for permission.',
@@ -18,18 +21,20 @@ export async function generateContentPack({
   creativePrompt = '',
   quoteDescription = '',
   day,
-  totalDays
+  totalDays,
+  excludeQuotes = []
 }) {
-  const creativeDirection = creativePrompt.trim();
-  const direction = quoteDescription.trim();
-  if (!process.env.OPENAI_API_KEY) {
-    const quote = fallbackQuotes[(day - 1) % fallbackQuotes.length];
+  if (useDemoContent()) {
+    const demo = getDemoContent(category, day - 1, excludeQuotes);
+    const hashtags = getDemoHashtags(category);
     return {
-      quote,
-      caption: `Day ${day}/${totalDays}: ${quote} Save this reminder for the moment you need it.`,
-      hashtags: buildHashtags(category)
+      quote: demo.quote,
+      caption: demo.caption,
+      hashtags,
+      generationMode: 'demo'
     };
   }
+
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const prompt = [
@@ -40,11 +45,11 @@ export async function generateContentPack({
     agentGoal ? `Agent goal: ${agentGoal}.` : '',
     agentStrategy ? `Strategy summary: ${agentStrategy.strategySummary}. Audience insight: ${agentStrategy.audienceInsight}. Content pillars: ${agentStrategy.contentPillars.join(', ')}.` : '',
     dailyMission ? `Today\'s agent mission: ${dailyMission}.` : '',
-    creativeDirection
-      ? `Creative prompt from user: ${creativeDirection}. Interpret this like a ChatGPT creative brief. Innovate within this direction, but keep the final quote concise and original.`
+    creativePrompt
+      ? `Creative prompt from user: ${creativePrompt}. Interpret this like a ChatGPT creative brief. Innovate within this direction, but keep the final quote concise and original.`
       : 'No broad creative prompt was provided. Innovate from the structured fields only.',
-    direction
-      ? `Specific quote direction: ${direction}. Follow this direction closely while keeping the quote original.`
+    quoteDescription
+      ? `Specific quote direction: ${quoteDescription}. Follow this direction closely while keeping the quote original.`
       : 'No specific quote direction was provided. Use only the category to decide the quote idea.',
     `Tone: ${tone}. This is day ${day} of ${totalDays}.`,
     'Return strict JSON with keys quote, caption, hashtags.',
@@ -79,7 +84,8 @@ export async function generateContentPack({
   return {
     quote: parsed.quote,
     caption: parsed.caption,
-    hashtags: parsed.hashtags.map((tag) => tag.startsWith('#') ? tag : `#${tag}`)
+    hashtags: normalizeHashtags(parsed.hashtags),
+    generationMode: 'live'
   };
 }
 

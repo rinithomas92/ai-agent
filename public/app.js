@@ -16,10 +16,23 @@ const els = {
   refresh: document.querySelector('#refresh'),
   runDue: document.querySelector('#runDue'),
   imageUpload: document.querySelector('#imageUpload'),
-  uploadPreview: document.querySelector('#uploadPreview')
+  uploadPreview: document.querySelector('#uploadPreview'),
+  daysInput: document.querySelector('#daysInput'),
+  postsPerDayInput: document.querySelector('#postsPerDayInput'),
+  postTimesContainer: document.querySelector('#postTimesContainer'),
+  scheduleSummary: document.querySelector('#scheduleSummary')
 };
 
 document.querySelector('[name="startDate"]').valueAsDate = new Date();
+renderPostTimeInputs();
+updateScheduleSummary();
+
+els.postsPerDayInput.addEventListener('input', () => {
+  renderPostTimeInputs();
+  updateScheduleSummary();
+});
+
+els.daysInput.addEventListener('input', updateScheduleSummary);
 
 els.imageUpload.addEventListener('change', () => {
   const file = els.imageUpload.files?.[0];
@@ -36,12 +49,25 @@ els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.form));
   data.days = Number(data.days);
+  data.postsPerDay = Number(data.postsPerDay);
+  data.postTimes = [...els.postTimesContainer.querySelectorAll('input[name="postTimes"]')]
+    .map((input) => input.value)
+    .filter(Boolean);
+  data.postTime = data.postTimes[0] || '09:00';
   data.animation = Boolean(data.animation);
   data.agentMode = Boolean(data.agentMode);
   delete data.imageUpload;
   els.status.textContent = 'Generating schedule...';
 
   try {
+    if (data.postTimes.length !== data.postsPerDay) {
+      throw new Error('Please set one posting time for every daily post.');
+    }
+
+    if (new Set(data.postTimes).size !== data.postTimes.length) {
+      throw new Error('Each daily post must have a different posting time.');
+    }
+
     const file = els.imageUpload.files?.[0];
     if (file) {
       els.status.textContent = 'Uploading image...';
@@ -55,9 +81,10 @@ els.form.addEventListener('submit', async (event) => {
       data.uploadedImagePath = state.uploadedImage.publicPath;
     }
 
-    els.status.textContent = 'Generating branded posts...';
-    await api('/api/plan', { method: 'POST', body: JSON.stringify(data) });
-    els.status.textContent = 'Schedule created. Downloads are ready.';
+    const totalPosts = data.days * data.postsPerDay;
+    els.status.textContent = `Generating ${totalPosts} branded post${totalPosts === 1 ? '' : 's'}...`;
+    const created = await api('/api/plan', { method: 'POST', body: JSON.stringify(data) });
+    els.status.textContent = `${created.length} post${created.length === 1 ? '' : 's'} scheduled successfully.`;
     await loadPosts();
   } catch (error) {
     els.status.textContent = error.message;
@@ -121,8 +148,9 @@ function renderCalendar() {
     day.innerHTML = `<div class="day-number">${cursor.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div>`;
     for (const post of state.posts.filter((item) => item.scheduledAt.slice(0, 10) === iso)) {
       const chip = document.createElement('button');
-      chip.className = `post-chip ${post.status}`;
-      chip.textContent = `${post.category} - ${post.status}`;
+      const displayStatus = post.status === 'published-demo' ? 'published' : post.status;
+      chip.className = `post-chip ${displayStatus}`;
+      chip.textContent = `${formatTime(post.scheduledAt)} · ${post.category} - ${displayStatus}`;
       chip.addEventListener('click', () => {
         state.selectedId = post.id;
         renderSelected();
@@ -143,11 +171,12 @@ function renderSelected() {
   }
   state.selectedId = post.id;
   const handle = post.instagramHandle || '@getholisticallyfitwithrini';
+  const statusStr = post.status === 'published-demo' ? 'published' : post.status;
   els.selected.className = 'selected-card';
   els.selected.innerHTML = `
     <img src="${post.imagePath}" alt="Generated quote card">
     <div>
-      <p class="meta">${formatDate(post.scheduledAt, true)} - ${post.status}</p>
+      <p class="meta">${formatDate(post.scheduledAt, true)} - ${escapeHtml(statusStr)}</p>
       <h3 class="quote">${escapeHtml(post.quote)}</h3>
       <p>${escapeHtml(post.caption)}</p>
       <p class="meta">${escapeHtml(post.creatorName || 'Rini')} - ${escapeHtml(handle)}</p>
@@ -159,6 +188,7 @@ function renderSelected() {
       <div class="actions">
         <a class="ghost-button link-button" href="${post.imagePath}" download="instagram-post-${post.scheduledAt.slice(0, 10)}.svg">Download Post</a>
         <button class="ghost-button" data-action="regenerate">Regenerate</button>
+        <button class="ghost-button" data-action="regenerate-hashtags">Regenerate Hashtags</button>
         <button class="ghost-button" data-action="grok-image">Grok Image</button>
         <button class="ghost-button" data-action="animate">Animate</button>
         <button class="primary-button compact-primary" data-action="publish">Publish Now</button>
@@ -215,10 +245,117 @@ function formatDate(value, withTime = false) {
   });
 }
 
+function formatTime(value) {
+  const date = new Date(value);
+  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderPostTimeInputs() {
+  const count = clampInteger(els.postsPerDayInput.value, 1, 10, 1);
+  els.postsPerDayInput.value = String(count);
+
+  const existingTimes = [...els.postTimesContainer.querySelectorAll('input[name="postTimes"]')]
+    .map((input) => input.value);
+  const defaults = getDefaultPostTimes(count);
+
+  els.postTimesContainer.innerHTML = '';
+  for (let index = 0; index < count; index += 1) {
+    const label = document.createElement('label');
+    label.className = 'post-time-field';
+    label.innerHTML = `
+      Post ${index + 1} Time
+      <input name="postTimes" type="time" value="${existingTimes[index] || defaults[index]}" required />
+    `;
+    els.postTimesContainer.appendChild(label);
+  }
+}
+
+function updateScheduleSummary() {
+  const days = clampInteger(els.daysInput.value, 1, 50, 1);
+  const postsPerDay = clampInteger(els.postsPerDayInput.value, 1, 10, 1);
+  const total = days * postsPerDay;
+  els.scheduleSummary.textContent = `${days} day${days === 1 ? '' : 's'} × ${postsPerDay} post${postsPerDay === 1 ? '' : 's'} per day = ${total} total post${total === 1 ? '' : 's'}`;
+}
+
+function clampInteger(value, min, max, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function getDefaultPostTimes(count) {
+  const presets = {
+    1: ['09:00'],
+    2: ['09:00', '18:00'],
+    3: ['09:00', '14:00', '19:00'],
+    4: ['08:00', '12:00', '16:00', '20:00'],
+    5: ['08:00', '11:00', '14:00', '17:00', '20:00']
+  };
+  if (presets[count]) return presets[count];
+
+  const startMinutes = 8 * 60;
+  const endMinutes = 22 * 60;
+  const step = (endMinutes - startMinutes) / Math.max(1, count - 1);
+  return Array.from({ length: count }, (_, index) => {
+    const totalMinutes = Math.round((startMinutes + step * index) / 5) * 5;
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  });
+}
+
 function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value;
   return div.innerHTML;
 }
 
+// Load Instagram status and bind connection test
+async function loadInstagramStatus() {
+  try {
+    const status = await api('/api/integrations/instagram/status');
+    const textEl = document.querySelector('#instagramStatusText');
+    if (status.status === 'connected') {
+      if (status.mode === 'demo') {
+        textEl.innerHTML = `Instagram: Demo Connection<br>Publishing: Simulated`;
+      } else {
+        textEl.innerHTML = `Connected: @${escapeHtml(status.username)}`;
+      }
+    } else {
+      textEl.innerHTML = `Disconnected<br>${escapeHtml(status.error || '')}`;
+    }
+  } catch (error) {
+    document.querySelector('#instagramStatusText').textContent = 'Error checking connection';
+  }
+}
+
+document.querySelector('#testInstagramConnection').addEventListener('click', async () => {
+  const btn = document.querySelector('#testInstagramConnection');
+  btn.disabled = true;
+  const textEl = document.querySelector('#instagramStatusText');
+  textEl.textContent = 'Testing connection...';
+  await loadInstagramStatus();
+  btn.disabled = false;
+});
+
+// Bind Suggest Creative Direction button
+document.querySelector('#suggestCreativeBtn').addEventListener('click', async () => {
+  const form = document.querySelector('#planForm');
+  const category = form.querySelector('[name="category"]').value;
+  const tone = form.querySelector('[name="tone"]').value;
+  const statusEl = document.querySelector('#formStatus');
+  statusEl.textContent = 'Suggesting creative direction...';
+  try {
+    const res = await api('/api/suggest-creative-direction', {
+      method: 'POST',
+      body: JSON.stringify({ category, tone })
+    });
+    form.querySelector('[name="creativePrompt"]').value = res.suggestion;
+    statusEl.textContent = 'Creative direction suggested!';
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+  }
+});
+
 loadPosts();
+loadInstagramStatus();

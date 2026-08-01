@@ -97,7 +97,7 @@ h2 {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 14px;
   margin: 26px 0;
 }
@@ -166,6 +166,49 @@ textarea {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+
+.posting-times-section {
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  background: rgba(11, 13, 24, 0.72);
+}
+
+.field-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #dbe4f0;
+  font-size: 14px;
+}
+
+.field-heading small {
+  color: #8f96aa;
+  font-size: 11px;
+  text-align: right;
+}
+
+.post-times-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.post-time-field {
+  margin-bottom: 0;
+  font-size: 12px;
+  color: #aeb7c8;
+}
+
+.schedule-summary {
+  margin: 12px 0 0;
+  color: #c4b5fd;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .toggle {
@@ -269,7 +312,8 @@ textarea {
   font-size: 12px;
 }
 
-.post-chip.published {
+.post-chip.published,
+.post-chip.published-demo {
   background: #15803d;
 }
 
@@ -280,6 +324,7 @@ textarea {
 .post-chip.publishing {
   background: #b45309;
 }
+
 
 .selected-card {
   display: grid;
@@ -353,6 +398,10 @@ textarea {
   }
 
   .stats-grid, .content-grid, .selected-card {
+    grid-template-columns: 1fr;
+  }
+
+  .post-times-grid {
     grid-template-columns: 1fr;
   }
 

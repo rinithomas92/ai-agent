@@ -45,6 +45,11 @@
             <span>Next Post</span>
             <strong id="nextPost">--</strong>
           </article>
+          <article class="metric">
+            <span>Instagram Status</span>
+            <strong id="instagramStatusText" style="font-size: 13px; font-weight: normal; margin-top: 8px; line-height: 1.4; min-height: 38px;">Checking...</strong>
+            <button id="testInstagramConnection" type="button" class="ghost-button" style="margin-top: 8px; font-size: 11px; padding: 4px 8px; min-height: 24px; border-radius: 4px; display: block; width: 100%;">Test Connection</button>
+          </article>
         </section>
 
         <section class="content-grid">
@@ -66,7 +71,10 @@
               <input name="category" value="Self Worth" required />
             </label>
             <label>
-              Creative Prompt
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span>Creative Direction</span>
+                <button type="button" id="suggestCreativeBtn" class="ghost-button" style="min-height: 28px; font-size: 12px; padding: 2px 10px; border-radius: 6px;">Suggest Creative Direction</button>
+              </div>
               <textarea name="creativePrompt" rows="6" placeholder="Optional: paste a full ChatGPT-style prompt. Example: Create premium Instagram posts for women healing from emotional burnout, with elegant magazine styling, poetic quotes, and a confident feminine voice."></textarea>
             </label>
             <label>
@@ -96,14 +104,22 @@
             </div>
             <div class="two-col">
               <label>
-                Days
-                <input name="days" type="number" min="1" max="365" value="30" required />
+                Number of Days
+                <input id="daysInput" name="days" type="number" min="1" max="50" value="1" step="1" required />
               </label>
               <label>
-                Post Time
-                <input name="postTime" type="time" value="09:00" required />
+                Posts per Day
+                <input id="postsPerDayInput" name="postsPerDay" type="number" min="1" max="10" value="1" step="1" required />
               </label>
             </div>
+            <section class="posting-times-section" aria-labelledby="postingTimesHeading">
+              <div class="field-heading">
+                <span id="postingTimesHeading">Posting Times</span>
+                <small>Choose a separate time for each daily post.</small>
+              </div>
+              <div id="postTimesContainer" class="post-times-grid"></div>
+              <p id="scheduleSummary" class="schedule-summary">1 day × 1 post per day = 1 total post</p>
+            </section>
             <div class="two-col">
               <label>
                 Start Date
@@ -119,6 +135,24 @@
                   <option>Elegant</option>
                 </select>
               </label>
+            </div>
+            <div class="two-col">
+              <label>
+                Theme
+                <select name="theme">
+                  <option value="minimalLight">Minimal Light</option>
+                  <option value="minimalDark">Minimal Dark</option>
+                  <option value="luxury">Luxury</option>
+                  <option value="wellness">Wellness</option>
+                  <option value="corporate">Corporate</option>
+                  <option value="technology">Technology</option>
+                  <option value="boldMotivation">Bold Motivation</option>
+                  <option value="nature">Nature</option>
+                  <option value="magazine">Magazine</option>
+                  <option value="random">Random</option>
+                </select>
+              </label>
+              <label style="visibility: hidden;">Spacer</label>
             </div>
             <label class="toggle">
               <input name="animation" type="checkbox" />

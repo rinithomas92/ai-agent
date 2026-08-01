@@ -13,14 +13,19 @@ import { generateContentPack } from './services/openai.js';
 import { createAgentStrategy, getDailyMission, reviewContent } from './services/agent.js';
 import { createQuoteCard } from './services/renderCard.js';
 import { generateGrokImage, animateWithGrok } from './services/xai.js';
-import { publishToInstagram } from './services/instagram.js';
+import { publishToInstagram, validateCredentials } from './services/instagram.js';
 import { startScheduler, runDuePostsNow } from './scheduler.js';
+import { getRuntimeModes, useDemoContent, useDemoImages, useDemoPublishing } from './runtimeMode.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const app = express();
 const port = Number(process.env.PORT || 5177);
 const host = process.env.HOST || '0.0.0.0';
+const configuredMaxPostsPerDay = Number(process.env.MAX_POSTS_PER_DAY || 10);
+const maxPostsPerDay = Number.isInteger(configuredMaxPostsPerDay) && configuredMaxPostsPerDay > 0
+  ? configuredMaxPostsPerDay
+  : 10;
 
 app.use(cors());
 app.use(express.json({ limit: '30mb' }));
@@ -30,10 +35,13 @@ app.use(express.static(path.join(root, 'public')));
 
 const planSchema = z.object({
   category: z.string().min(2),
-  days: z.coerce.number().int().min(1).max(365),
+  days: z.coerce.number().int().min(1).max(50),
+  postsPerDay: z.coerce.number().int().min(1).max(maxPostsPerDay).default(1),
   startDate: z.string().min(10),
-  postTime: z.string().regex(/^\d{2}:\d{2}$/),
+  postTime: z.string().regex(/^\d{2}:\d{2}$/).optional().default('09:00'),
+  postTimes: z.array(z.string().regex(/^\d{2}:\d{2}$/)).max(maxPostsPerDay).optional().default([]),
   tone: z.string().min(2).default('inspirational'),
+  theme: z.string().min(2).default('minimalLight'),
   agentMode: z.boolean().default(true),
   agentGoal: z.string().max(1500).optional().default(''),
   creativePrompt: z.string().max(3000).optional().default(''),
@@ -51,7 +59,15 @@ const uploadSchema = z.object({
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, schedulerTimezone: process.env.SCHEDULER_TIMEZONE || 'Asia/Kolkata' });
+  res.json({
+    ok: true,
+    schedulerTimezone: process.env.SCHEDULER_TIMEZONE || 'Asia/Kolkata',
+    runtime: getRuntimeModes()
+  });
+});
+
+app.get('/api/runtime-status', (_req, res) => {
+  res.json(getRuntimeModes());
 });
 
 app.get('/api/settings', (_req, res) => {
@@ -95,72 +111,123 @@ app.post('/api/uploads', async (req, res, next) => {
   }
 });
 
+function validatePostContent(content, isDemo) {
+  const quoteWords = content.quote.trim().split(/\s+/).filter(Boolean).length;
+  if (quoteWords < 8 || quoteWords > 18) {
+    throw new Error(`Quote length must be between 8 and 18 words (got ${quoteWords} words: "${content.quote}").`);
+  }
+
+  const tags = content.hashtags || [];
+  const uniqueTags = new Set(tags.map((t) => t.toLowerCase()));
+  if (uniqueTags.size !== tags.length) {
+    throw new Error(`Duplicate hashtags detected: ${tags.join(', ')}`);
+  }
+
+  if (isDemo) {
+    if (tags.length < 8 || tags.length > 12) {
+      throw new Error(`Hashtag count in Demo Mode must be between 8 and 12 (got ${tags.length}).`);
+    }
+  }
+}
+
 app.post('/api/plan', async (req, res, next) => {
   try {
     const input = planSchema.parse(req.body);
+    const postTimes = resolvePostTimes(input);
+    const totalPosts = input.days * input.postsPerDay;
     const posts = getPosts();
     const created = [];
     const agentStrategy = await createAgentStrategy(input);
+    let sequenceIndex = 0;
 
     for (let day = 0; day < input.days; day += 1) {
       const yyyyMmDd = addDaysToDateString(input.startDate, day);
-      const scheduledAt = `${yyyyMmDd}T${input.postTime}:00`;
       const dailyMission = getDailyMission(agentStrategy, day, input);
-      const content = await generateContentPack({
-        category: input.category,
-        tone: input.tone,
-        agentMode: input.agentMode,
-        agentGoal: input.agentGoal,
-        agentStrategy,
-        dailyMission,
-        creativePrompt: input.creativePrompt,
-        quoteDescription: input.quoteDescription,
-        day: day + 1,
-        totalDays: input.days
-      });
-      const brand = {
-        creatorName: input.creatorName,
-        instagramHandle: input.instagramHandle,
-        uploadedImagePath: input.uploadedImagePath,
-        backgroundDescription: input.backgroundDescription
-      };
-      const styleVariant = day % 3;
-      const card = await createQuoteCard(content, { category: input.category, styleVariant, ...brand });
-      const agentReview = reviewContent(content, input, agentStrategy, dailyMission);
-      const post = {
-        id: randomUUID(),
-        category: input.category,
-        tone: input.tone,
-        agentMode: input.agentMode,
-        agentGoal: input.agentGoal,
-        agentStrategy,
-        agentMission: dailyMission,
-        agentQualityScore: agentReview.score,
-        agentRationale: agentReview.rationale,
-        creativePrompt: input.creativePrompt,
-        quoteDescription: input.quoteDescription,
-        backgroundDescription: input.backgroundDescription,
-        creatorName: input.creatorName,
-        instagramHandle: input.instagramHandle,
-        uploadedImagePath: input.uploadedImagePath,
-        styleVariant,
-        scheduledAt,
-        status: 'scheduled',
-        animationRequested: input.animation,
-        quote: content.quote,
-        caption: content.caption,
-        hashtags: content.hashtags,
-        imagePath: card.publicPath,
-        imageUrl: card.publicUrl,
-        grokImageUrl: null,
-        videoUrl: null,
-        instagramMediaId: null,
-        error: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      posts.push(post);
-      created.push(post);
+
+      for (let postIndex = 0; postIndex < input.postsPerDay; postIndex += 1) {
+        const scheduledAt = `${yyyyMmDd}T${postTimes[postIndex]}:00`;
+        const content = await generateContentPack({
+          category: input.category,
+          tone: input.tone,
+          agentMode: input.agentMode,
+          agentGoal: input.agentGoal,
+          agentStrategy,
+          dailyMission,
+          creativePrompt: input.creativePrompt,
+          quoteDescription: input.quoteDescription,
+          day: sequenceIndex + 1,
+          totalDays: totalPosts,
+          excludeQuotes: created.map((post) => post.quote.toLowerCase())
+        });
+
+        if (useDemoContent()) {
+          const isDuplicate = created.some((post) => post.quote.toLowerCase() === content.quote.toLowerCase());
+          if (isDuplicate) {
+            throw new Error(`Duplicate demo quote generated in the same request: "${content.quote}"`);
+          }
+        }
+
+        validatePostContent(content, useDemoContent());
+
+        const brand = {
+          creatorName: input.creatorName,
+          instagramHandle: input.instagramHandle,
+          uploadedImagePath: input.uploadedImagePath,
+          backgroundDescription: input.backgroundDescription
+        };
+        const styleVariant = sequenceIndex % 3;
+        const card = await createQuoteCard(content, {
+          category: input.category,
+          styleVariant,
+          theme: input.theme,
+          creativePrompt: input.creativePrompt,
+          ...brand
+        });
+        const agentReview = reviewContent(content, input, agentStrategy, dailyMission);
+        const post = {
+          id: randomUUID(),
+          category: input.category,
+          tone: input.tone,
+          theme: input.theme,
+          agentMode: input.agentMode,
+          agentGoal: input.agentGoal,
+          agentStrategy,
+          agentMission: dailyMission,
+          agentQualityScore: agentReview.score,
+          agentRationale: agentReview.rationale,
+          creativePrompt: input.creativePrompt,
+          quoteDescription: input.quoteDescription,
+          backgroundDescription: input.backgroundDescription,
+          creatorName: input.creatorName,
+          instagramHandle: input.instagramHandle,
+          uploadedImagePath: input.uploadedImagePath,
+          campaignDays: input.days,
+          postsPerDay: input.postsPerDay,
+          dayNumber: day + 1,
+          postNumberForDay: postIndex + 1,
+          postTime: postTimes[postIndex],
+          styleVariant,
+          scheduledAt,
+          status: 'scheduled',
+          animationRequested: input.animation,
+          quote: content.quote,
+          caption: content.caption,
+          hashtags: content.hashtags,
+          generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
+          imageGenerationMode: 'svg-demo',
+          imagePath: card.publicPath,
+          imageUrl: card.publicUrl,
+          grokImageUrl: null,
+          videoUrl: null,
+          instagramMediaId: null,
+          error: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        posts.push(post);
+        created.push(post);
+        sequenceIndex += 1;
+      }
     }
 
     savePosts(posts);
@@ -186,15 +253,21 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       creativePrompt: post.creativePrompt || '',
       quoteDescription: post.quoteDescription || '',
       day: 1,
-      totalDays: 1
+      totalDays: 1,
+      excludeQuotes: posts.filter((p) => p.id !== post.id).map((p) => p.quote.toLowerCase())
     });
+
+    validatePostContent(content, useDemoContent());
+
     const card = await createQuoteCard(content, {
       category: post.category,
       creatorName: post.creatorName || 'Rini',
       instagramHandle: post.instagramHandle || '@getholisticallyfitwithrini',
       uploadedImagePath: post.uploadedImagePath,
       backgroundDescription: post.backgroundDescription || '',
-      styleVariant: post.styleVariant || 0
+      styleVariant: post.styleVariant || 0,
+      theme: post.theme || 'minimalLight',
+      creativePrompt: post.creativePrompt || ''
     });
     const agentReview = reviewContent(content, {
       category: post.category,
@@ -205,6 +278,8 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       quote: content.quote,
       caption: content.caption,
       hashtags: content.hashtags,
+      generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
+      imageGenerationMode: 'svg-demo',
       agentQualityScore: agentReview.score,
       agentRationale: agentReview.rationale,
       imagePath: card.publicPath,
@@ -226,8 +301,24 @@ app.post('/api/posts/:id/grok-image', async (req, res, next) => {
     const post = posts.find((item) => item.id === req.params.id);
     if (!post) return res.status(404).json({ error: 'Post not found' });
 
-    const grokImage = await generateGrokImage(post);
-    post.grokImageUrl = grokImage.url;
+    if (useDemoImages()) {
+      post.grokImageUrl = post.imageUrl;
+      post.imageGenerationMode = 'svg-demo';
+      post.updatedAt = new Date().toISOString();
+      savePosts(posts);
+      return res.json(post);
+    }
+
+
+    try {
+      const grokImage = await generateGrokImage(post);
+      post.grokImageUrl = grokImage.url;
+      post.imageGenerationMode = 'xai';
+    } catch (err) {
+      post.imageGenerationMode = 'svg-demo';
+      throw err;
+    }
+
     post.updatedAt = new Date().toISOString();
     savePosts(posts);
     res.json(post);
@@ -241,6 +332,14 @@ app.post('/api/posts/:id/animate', async (req, res, next) => {
     const posts = getPosts();
     const post = posts.find((item) => item.id === req.params.id);
     if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    if (useDemoImages()) {
+      post.videoUrl = post.imageUrl;
+      post.updatedAt = new Date().toISOString();
+      savePosts(posts);
+      return res.json(post);
+    }
+
 
     const video = await animateWithGrok(post);
     post.videoUrl = video.url;
@@ -258,13 +357,155 @@ app.post('/api/posts/:id/publish', async (req, res, next) => {
     const post = posts.find((item) => item.id === req.params.id);
     if (!post) return res.status(404).json({ error: 'Post not found' });
 
+    if (useDemoPublishing()) {
+      post.status = 'publishing';
+      post.updatedAt = new Date().toISOString();
+      savePosts(posts);
+
+      // simulate delay
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      post.status = 'published';
+      post.instagramMediaId = `DEMO_${Math.floor(100000 + Math.random() * 900000)}`;
+      post.publishingMode = 'demo';
+      post.error = null;
+      post.updatedAt = new Date().toISOString();
+      savePosts(posts);
+      return res.json(post);
+    }
+
+
     const result = await publishToInstagram(post);
     post.status = 'published';
     post.instagramMediaId = result.mediaId;
+    post.publishingMode = 'live';
     post.error = null;
     post.updatedAt = new Date().toISOString();
     savePosts(posts);
     res.json(post);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/posts/:id/regenerate-hashtags', async (req, res, next) => {
+  try {
+    const posts = getPosts();
+    const post = posts.find((item) => item.id === req.params.id);
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    if (useDemoContent()) {
+      const { getDemoHashtags } = await import('./data/hashtags.js');
+      post.hashtags = getDemoHashtags(post.category);
+      post.updatedAt = new Date().toISOString();
+      savePosts(posts);
+      return res.json(post);
+    }
+
+
+    const OpenAI = (await import('openai')).default;
+    const { normalizeHashtags } = await import('./data/hashtags.js');
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const prompt = `Based on this Instagram quote post: "${post.quote}", suggest 8-12 relevant, distinct hashtags. Return strict JSON array of strings containing hashtags only under key "hashtags".`;
+
+    const response = await client.responses.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+      input: prompt,
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'hashtags_suggestion',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['hashtags'],
+            properties: {
+              hashtags: { type: 'array', items: { type: 'string' } }
+            }
+          }
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.output_text);
+    post.hashtags = normalizeHashtags(parsed.hashtags);
+    post.updatedAt = new Date().toISOString();
+    savePosts(posts);
+    res.json(post);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/integrations/instagram/status', async (req, res, next) => {
+  try {
+    if (useDemoPublishing()) {
+      return res.json({
+        status: 'connected',
+        mode: 'demo',
+        message: 'Instagram: Demo Connection\nPublishing: Simulated',
+        username: 'demo_user'
+      });
+    }
+
+    const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const igUserId = process.env.INSTAGRAM_IG_USER_ID;
+    if (!accessToken || !igUserId) {
+      return res.json({
+        status: 'disconnected',
+        mode: 'live',
+        error: 'Missing INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_IG_USER_ID'
+      });
+    }
+
+    try {
+      const info = await validateCredentials();
+      res.json({
+        status: 'connected',
+        mode: 'live',
+        username: info.username
+      });
+    } catch (err) {
+      res.json({
+        status: 'error',
+        mode: 'live',
+        error: err.message
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/suggest-creative-direction', async (req, res, next) => {
+  try {
+    const { category, tone } = req.body;
+    if (useDemoContent()) {
+      const suggestions = [
+        "Minimal Light: clean layout, thin fonts, pastel colors, wellness focus",
+        "Minimal Dark: dark background, white text, technology aesthetic",
+        "Luxury: gold accents, elegant fonts, dark background, premium branding",
+        "Nature: green and blue gradients, organic shapes, calm typography",
+        "Bold Motivation: high contrast, big typography, dynamic shapes",
+        "Sunrise: warm yellow and orange gradients, uplifting tone",
+        "Ocean: deep blue waves, white text, serene mood",
+        "Desert: sand tones, minimalist lines, warm calm aesthetic"
+      ];
+      const selected = suggestions[Math.floor(Math.random() * suggestions.length)];
+      return res.json({ suggestion: selected });
+    }
+
+    const OpenAI = (await import('openai')).default;
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const prompt = `Suggest a short Creative Direction description (under 25 words) for an Instagram brand post in category "${category}" with a "${tone}" tone. Focus on background style, colors, and typography mood. Return the text only.`;
+
+    const response = await client.responses.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+      input: prompt
+    });
+
+    const suggestion = response.output_text.trim();
+    res.json({ suggestion });
   } catch (error) {
     next(error);
   }
@@ -326,6 +567,51 @@ function addDaysToDateString(yyyyMmDd, days) {
   const [year, month, date] = yyyyMmDd.split('-').map(Number);
   const value = new Date(Date.UTC(year, month - 1, date + days));
   return value.toISOString().slice(0, 10);
+}
+
+function resolvePostTimes(input) {
+  const requestedCount = input.postsPerDay || 1;
+  const providedTimes = Array.isArray(input.postTimes)
+    ? input.postTimes.map((time) => String(time).trim()).filter(Boolean)
+    : [];
+
+  if (providedTimes.length > 0 && providedTimes.length !== requestedCount) {
+    throw new Error(`Please provide exactly ${requestedCount} posting time${requestedCount === 1 ? '' : 's'}.`);
+  }
+
+  const resolved = providedTimes.length
+    ? providedTimes
+    : buildDefaultPostTimes(requestedCount, input.postTime || '09:00');
+
+  if (new Set(resolved).size !== resolved.length) {
+    throw new Error('Each daily post must have a different posting time.');
+  }
+
+  return resolved;
+}
+
+function buildDefaultPostTimes(count, firstTime) {
+  if (count === 1) return [firstTime];
+
+  const presets = {
+    2: ['09:00', '18:00'],
+    3: ['09:00', '14:00', '19:00'],
+    4: ['08:00', '12:00', '16:00', '20:00'],
+    5: ['08:00', '11:00', '14:00', '17:00', '20:00']
+  };
+  if (presets[count] && firstTime === '09:00') return presets[count];
+
+  const [firstHour, firstMinute] = firstTime.split(':').map(Number);
+  const startMinutes = firstHour * 60 + firstMinute;
+  const availableMinutes = Math.max(60, (24 * 60 - startMinutes - 30));
+  const step = Math.max(60, Math.floor(availableMinutes / count));
+
+  return Array.from({ length: count }, (_, index) => {
+    const totalMinutes = (startMinutes + step * index) % (24 * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  });
 }
 
 function publicPathToFile(publicPath) {

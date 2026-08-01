@@ -1,6 +1,7 @@
 import { getPosts, savePosts } from './store.js';
 import { animateWithGrok } from './services/xai.js';
 import { publishToInstagram } from './services/instagram.js';
+import { useDemoPublishing } from './runtimeMode.js';
 
 let started = false;
 
@@ -30,10 +31,12 @@ export async function runDuePostsNow() {
       }
 
       const published = await publishToInstagram(post);
+      const simulated = published.demo === true || useDemoPublishing();
       post.status = 'published';
+      post.publishingMode = simulated ? 'demo' : 'live';
       post.instagramMediaId = published.mediaId;
       post.error = null;
-      results.push({ id: post.id, status: 'published' });
+      results.push({ id: post.id, status: post.status });
     } catch (error) {
       post.status = 'failed';
       post.error = error.message;
