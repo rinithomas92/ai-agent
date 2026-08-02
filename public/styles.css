@@ -339,6 +339,13 @@ textarea {
   border: 1px solid #2d3045;
 }
 
+.selected-card .reference-thumb {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  margin: 4px 0 10px;
+}
+
 .quote {
   font-size: 26px;
   line-height: 1.18;

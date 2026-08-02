@@ -15,37 +15,56 @@ export async function createAgentStrategy(input) {
     `Category: ${input.category}. Tone: ${input.tone}.`,
     input.agentGoal ? `Brand goal: ${input.agentGoal}.` : 'Brand goal: grow trust, saves, and daily engagement.',
     input.creativePrompt ? `Creative prompt: ${input.creativePrompt}.` : '',
+    input.referencePost ? `Reference post to emulate without copying:\n${truncateForPrompt(input.referencePost, 2500)}` : '',
+    input.referencePostImagePath ? 'A reference post image was uploaded. Keep the strategy aligned with its visual style, hierarchy, mood, and audience signal without copying the exact design.' : '',
     input.quoteDescription ? `Quote direction: ${input.quoteDescription}.` : '',
     input.backgroundDescription ? `Visual direction: ${input.backgroundDescription}.` : '',
+    input.sourceFileContext
+      ? `Uploaded source material to mine for themes, language, ideas, and monthly content angles:\n${truncateForPrompt(input.sourceFileContext, 12000)}`
+      : '',
     `Create a ${input.days}-day content strategy.`,
     'Return strict JSON with strategySummary, audienceInsight, contentPillars, and dailyMissions.',
     'dailyMissions must contain one short mission per day.'
   ].filter(Boolean).join('\n');
 
-  const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-    input: prompt,
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'agent_strategy',
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['strategySummary', 'audienceInsight', 'contentPillars', 'dailyMissions'],
-          properties: {
-            strategySummary: { type: 'string' },
-            audienceInsight: { type: 'string' },
-            contentPillars: { type: 'array', items: { type: 'string' } },
-            dailyMissions: { type: 'array', items: { type: 'string' } }
+  try {
+    const response = await client.responses.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+      input: prompt,
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'agent_strategy',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['strategySummary', 'audienceInsight', 'contentPillars', 'dailyMissions'],
+            properties: {
+              strategySummary: { type: 'string' },
+              audienceInsight: { type: 'string' },
+              contentPillars: { type: 'array', items: { type: 'string' } },
+              dailyMissions: { type: 'array', items: { type: 'string' } }
+            }
           }
         }
       }
-    }
-  });
+    });
 
-  const parsed = JSON.parse(response.output_text);
-  return normalizeStrategy(parsed, input);
+    const parsed = JSON.parse(response.output_text);
+    return normalizeStrategy(parsed, input);
+  } catch (error) {
+    if (isRecoverableOpenAIError(error)) return fallbackStrategy(input);
+    throw error;
+  }
+}
+
+function isRecoverableOpenAIError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.status === 429
+    || message.includes('quota')
+    || message.includes('rate limit')
+    || message.includes('billing')
+    || message.includes('model');
 }
 
 export function getDailyMission(strategy, dayIndex, input) {
@@ -89,14 +108,22 @@ function normalizeStrategy(strategy, input) {
 
 function fallbackStrategy(input) {
   return normalizeStrategy({
-    strategySummary: `Build a ${input.days}-day content arc that turns ${input.category} into daily save-worthy reminders.`,
+    strategySummary: input.sourceFileName
+      ? `Build a ${input.days}-day content arc from ${input.sourceFileName}, turning its strongest ideas into daily save-worthy posts.`
+      : `Build a ${input.days}-day content arc that turns ${input.category} into daily save-worthy reminders.`,
     audienceInsight: 'Audience responds to precise emotional truths, confident boundaries, and elegant visual consistency.',
     contentPillars: defaultPillars(input.category),
     dailyMissions: Array.from({ length: input.days }, (_, index) => {
       const pillar = defaultPillars(input.category)[index % defaultPillars(input.category).length];
-      return `Create a ${pillar.toLowerCase()} post for women who want ${input.category.toLowerCase()} to feel practical and personal.`;
+      const sourcePrefix = input.sourceFileName ? `Use one idea from ${input.sourceFileName}. ` : '';
+      return `${sourcePrefix}Create a ${pillar.toLowerCase()} post for women who want ${input.category.toLowerCase()} to feel practical and personal.`;
     })
   }, input);
+}
+
+function truncateForPrompt(value, maxChars) {
+  const text = String(value || '').trim();
+  return text.length > maxChars ? `${text.slice(0, maxChars).trim()}\n...[truncated]` : text;
 }
 
 function defaultPillars(category) {

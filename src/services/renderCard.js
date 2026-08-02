@@ -91,7 +91,7 @@ function fitSize(lineCount, sizes) {
 function detectKeywords(creativePrompt = '', category = '', tone = '') {
   const text = `${creativePrompt} ${category} ${tone}`.toLowerCase();
   const keywords = {};
-  const list = ['dark', 'light', 'luxury', 'calm', 'bold', 'technology', 'nature', 'corporate', 'colourful', 'colorful', 'minimal', 'sunrise', 'desert', 'ocean'];
+  const list = ['dark', 'light', 'luxury', 'calm', 'bold', 'technology', 'nature', 'corporate', 'colourful', 'colorful', 'minimal', 'sunrise', 'desert', 'ocean', 'church', 'bible', 'biblical', 'scripture', 'verse', 'christian'];
   for (const kw of list) {
     keywords[kw] = text.includes(kw);
   }
@@ -137,6 +137,7 @@ export function resolveThemeProperties(themeKey = 'minimalLight', creativePrompt
   else if (keywords.sunrise) base.svgBackgroundType = "sunrise";
   else if (keywords.desert) base.svgBackgroundType = "desert";
   else if (keywords.ocean) base.svgBackgroundType = "ocean";
+  else if (keywords.church || keywords.bible || keywords.biblical || keywords.scripture || keywords.verse || keywords.christian) base.svgBackgroundType = "church";
   else if (keywords.luxury) base.svgBackgroundType = "luxury";
   else if (keywords.calm) base.svgBackgroundType = "wellness";
   else if (keywords.minimal) base.svgBackgroundType = "minimal";
@@ -208,6 +209,24 @@ function renderSvgBackground(resolved, options) {
       <circle cx="540" cy="-100" r="600" fill="none" stroke="${accent}" stroke-width="1" opacity="0.1"/>
       <circle cx="540" cy="-100" r="800" fill="none" stroke="${accent}" stroke-width="1.5" opacity="0.08"/>
     `;
+  } else if (properties.svgBackgroundType === 'church') {
+    shapes += `
+      <!-- Church window, altar glow, and chapel arches -->
+      <radialGradient id="chapelGlow" cx="50%" cy="72%" r="50%">
+        <stop offset="0%" stop-color="${accent}" stop-opacity="0.38"/>
+        <stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
+      </radialGradient>
+      <rect width="1080" height="1350" fill="#090b16" opacity="0.42"/>
+      <circle cx="540" cy="940" r="420" fill="url(#chapelGlow)"/>
+      <path d="M250 690 L250 370 Q250 180 540 180 Q830 180 830 370 L830 690 Z" fill="none" stroke="${accent}" stroke-width="5" opacity="0.34"/>
+      <path d="M330 682 L330 410 Q330 260 540 260 Q750 260 750 410 L750 682 Z" fill="none" stroke="${accent}" stroke-width="2.5" opacity="0.28"/>
+      <line x1="540" y1="202" x2="540" y2="682" stroke="${accent}" stroke-width="2" opacity="0.22"/>
+      <line x1="316" y1="438" x2="764" y2="438" stroke="${accent}" stroke-width="2" opacity="0.2"/>
+      <line x1="412" y1="690" x2="480" y2="890" stroke="${accent}" stroke-width="1.5" opacity="0.2"/>
+      <line x1="668" y1="690" x2="600" y2="890" stroke="${accent}" stroke-width="1.5" opacity="0.2"/>
+      <path d="M120 1140 Q540 1008 960 1140" fill="none" stroke="${accent}" stroke-width="2" opacity="0.22"/>
+      <path d="M180 1210 Q540 1108 900 1210" fill="none" stroke="${accent}" stroke-width="1.5" opacity="0.16"/>
+    `;
   } else if (properties.svgBackgroundType === 'luxury') {
     shapes += `
       <!-- Elegant gold borders -->
@@ -247,7 +266,12 @@ function renderSvgBackground(resolved, options) {
 }
 
 function buildSvg(content, options) {
-  const resolved = resolveThemeProperties(options.theme, options.creativePrompt, options.category, options.tone);
+  const resolved = resolveThemeProperties(
+    options.theme,
+    `${options.creativePrompt || ''} ${options.backgroundDescription || ''}`,
+    options.category,
+    options.tone
+  );
   const variant = options.styleVariant % 3;
   if (variant === 1) return buildMagazineCover(content, options, resolved);
   if (variant === 2) return buildQuotePortrait(content, options, resolved);

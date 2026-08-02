@@ -1,6 +1,7 @@
 node_modules/
 .env
 data/*.json
+data/source-files/
 !data/posts.json
 public/generated/
 public/uploads/

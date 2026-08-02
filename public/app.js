@@ -1,7 +1,9 @@
 const state = {
   posts: [],
   selectedId: null,
-  uploadedImage: null
+  uploadedImage: null,
+  uploadedReferencePost: null,
+  uploadedSourceFile: null
 };
 
 const els = {
@@ -15,8 +17,14 @@ const els = {
   nextPost: document.querySelector('#nextPost'),
   refresh: document.querySelector('#refresh'),
   runDue: document.querySelector('#runDue'),
+  clearSchedule: document.querySelector('#clearSchedule'),
+  clearReferencePost: document.querySelector('#clearReferencePost'),
   imageUpload: document.querySelector('#imageUpload'),
   uploadPreview: document.querySelector('#uploadPreview'),
+  referencePostUpload: document.querySelector('#referencePostUpload'),
+  referencePostPreview: document.querySelector('#referencePostPreview'),
+  sourceFileUpload: document.querySelector('#sourceFileUpload'),
+  sourceFilePreview: document.querySelector('#sourceFilePreview'),
   daysInput: document.querySelector('#daysInput'),
   postsPerDayInput: document.querySelector('#postsPerDayInput'),
   postTimesContainer: document.querySelector('#postTimesContainer'),
@@ -45,6 +53,38 @@ els.imageUpload.addEventListener('change', () => {
   els.uploadPreview.innerHTML = `<img src="${url}" alt="Uploaded preview"><span>${escapeHtml(file.name)}</span>`;
 });
 
+els.referencePostUpload.addEventListener('change', () => {
+  const file = els.referencePostUpload.files?.[0];
+  if (!file) {
+    state.uploadedReferencePost = null;
+    els.referencePostPreview.innerHTML = '<span>No reference post uploaded</span>';
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  els.referencePostPreview.innerHTML = `
+    <img src="${url}" alt="Reference post preview">
+    <div>
+      <strong>${escapeHtml(file.name)}</strong>
+      <p class="meta">The agent will use this as visual inspiration for similar posts.</p>
+    </div>
+  `;
+});
+
+els.sourceFileUpload.addEventListener('change', () => {
+  const file = els.sourceFileUpload.files?.[0];
+  state.uploadedSourceFile = null;
+  if (!file) {
+    els.sourceFilePreview.innerHTML = '<span>No source file uploaded</span>';
+    return;
+  }
+  els.sourceFilePreview.innerHTML = `
+    <div>
+      <strong>${escapeHtml(file.name)}</strong>
+      <p class="meta">${formatBytes(file.size)} selected. It will be read by the agent when you generate the schedule.</p>
+    </div>
+  `;
+});
+
 els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.form));
@@ -56,7 +96,10 @@ els.form.addEventListener('submit', async (event) => {
   data.postTime = data.postTimes[0] || '09:00';
   data.animation = Boolean(data.animation);
   data.agentMode = Boolean(data.agentMode);
+  data.replaceExistingSchedule = Boolean(data.replaceExistingSchedule);
   delete data.imageUpload;
+  delete data.referencePostUpload;
+  delete data.sourceFileUpload;
   els.status.textContent = 'Generating schedule...';
 
   try {
@@ -81,8 +124,48 @@ els.form.addEventListener('submit', async (event) => {
       data.uploadedImagePath = state.uploadedImage.publicPath;
     }
 
+    const referencePostFile = els.referencePostUpload.files?.[0];
+    if (referencePostFile) {
+      els.status.textContent = 'Uploading reference post...';
+      const imageData = await readFileAsDataUrl(referencePostFile);
+      state.uploadedReferencePost = await api('/api/uploads', {
+        method: 'POST',
+        body: JSON.stringify({ imageData, filename: referencePostFile.name })
+      });
+      data.referencePostImagePath = state.uploadedReferencePost.publicPath;
+      els.referencePostPreview.innerHTML = `
+        <img src="${state.uploadedReferencePost.publicPath}" alt="Reference post preview">
+        <div>
+          <strong>${escapeHtml(state.uploadedReferencePost.originalName)}</strong>
+          <p class="meta">Reference post ready for visual style matching.</p>
+        </div>
+      `;
+    } else if (state.uploadedReferencePost?.publicPath) {
+      data.referencePostImagePath = state.uploadedReferencePost.publicPath;
+    }
+
+    const sourceFile = els.sourceFileUpload.files?.[0];
+    if (sourceFile) {
+      els.status.textContent = 'Reading source file...';
+      const fileData = await readFileAsDataUrl(sourceFile);
+      state.uploadedSourceFile = await api('/api/source-files', {
+        method: 'POST',
+        body: JSON.stringify({ fileData, filename: sourceFile.name })
+      });
+      data.sourceFileId = state.uploadedSourceFile.id;
+      els.sourceFilePreview.innerHTML = `
+        <div>
+          <strong>${escapeHtml(state.uploadedSourceFile.filename)}</strong>
+          <p class="meta">${escapeHtml(state.uploadedSourceFile.summary || 'Source file ready.')}</p>
+          <p class="meta">${state.uploadedSourceFile.characterCount} readable characters${state.uploadedSourceFile.truncated ? ' (truncated for prompt safety)' : ''}</p>
+        </div>
+      `;
+    } else if (state.uploadedSourceFile?.id) {
+      data.sourceFileId = state.uploadedSourceFile.id;
+    }
+
     const totalPosts = data.days * data.postsPerDay;
-    els.status.textContent = `Generating ${totalPosts} branded post${totalPosts === 1 ? '' : 's'}...`;
+    els.status.textContent = `Agent is creating ${totalPosts} post${totalPosts === 1 ? '' : 's'}${data.sourceFileId ? ' from your source file' : ''}...`;
     const created = await api('/api/plan', { method: 'POST', body: JSON.stringify(data) });
     els.status.textContent = `${created.length} post${created.length === 1 ? '' : 's'} scheduled successfully.`;
     await loadPosts();
@@ -95,6 +178,29 @@ els.refresh.addEventListener('click', loadPosts);
 els.runDue.addEventListener('click', async () => {
   await api('/api/run-due', { method: 'POST' });
   await loadPosts();
+});
+
+els.clearSchedule.addEventListener('click', async () => {
+  const confirmed = window.confirm('Clear all scheduled posts? This cannot be undone.');
+  if (!confirmed) return;
+
+  els.status.textContent = 'Clearing schedule...';
+  try {
+    await api('/api/posts', { method: 'DELETE' });
+    state.selectedId = null;
+    els.status.textContent = 'Schedule cleared.';
+    await loadPosts();
+  } catch (error) {
+    els.status.textContent = error.message;
+  }
+});
+
+els.clearReferencePost.addEventListener('click', () => {
+  els.form.querySelector('[name="referencePost"]').value = '';
+  els.referencePostUpload.value = '';
+  state.uploadedReferencePost = null;
+  els.referencePostPreview.innerHTML = '<span>No reference post uploaded</span>';
+  els.status.textContent = 'Reference post cleared.';
 });
 
 async function api(path, options = {}) {
@@ -180,6 +286,9 @@ function renderSelected() {
       <h3 class="quote">${escapeHtml(post.quote)}</h3>
       <p>${escapeHtml(post.caption)}</p>
       <p class="meta">${escapeHtml(post.creatorName || 'Rini')} - ${escapeHtml(handle)}</p>
+      ${post.sourceFileName ? `<p class="meta">Source file: ${escapeHtml(post.sourceFileName)}</p>` : ''}
+      ${post.referencePost || post.referencePostImagePath ? `<p class="meta">Reference post: used for similar style</p>` : ''}
+      ${post.referencePostImagePath ? `<img class="reference-thumb" src="${post.referencePostImagePath}" alt="Reference post image">` : ''}
       <p class="meta">${post.hashtags.map(escapeHtml).join(' ')}</p>
       ${post.videoUrl ? `<p class="meta">Video: <a href="${post.videoUrl}" target="_blank">open</a></p>` : ''}
       ${post.grokImageUrl ? `<p class="meta">Grok image: <a href="${post.grokImageUrl}" target="_blank">open</a></p>` : ''}
@@ -248,6 +357,12 @@ function formatDate(value, withTime = false) {
 function formatTime(value) {
   const date = new Date(value);
   return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function renderPostTimeInputs() {

@@ -68,6 +68,9 @@ This version stores schedules in `data/posts.json` and uploaded/generated files 
 
 - Builds a dynamic schedule using separate **Number of Days** and **Posts per Day** controls.
 - Supports a different posting time for every daily post. Total posts are calculated as `days × posts per day`.
+- Uploads a content source file (`.txt`, `.md`, `.csv`, `.json`, `.docx`, or `.pdf`) and lets the agent turn it into a month of content.
+- Accepts reference post text or an uploaded reference post image, then creates similar-but-original posts in the same style, structure, emotional angle, and visual direction.
+- Can clear the current calendar, or replace the existing schedule while generating a new one from a reference post.
 - Uses OpenAI to generate a quote, caption, and hashtags for your category.
 - Uploads a portrait or brand image and renders branded quote-card SVGs.
 - Adds creator name and Instagram handle to each post graphic.
@@ -89,6 +92,20 @@ Total: 6 scheduled posts
 ```
 
 Each daily posting time can be changed independently. Existing requests that only send `days` and `postTime` remain compatible and continue to create one post per day.
+
+Use **Clear Schedule** to remove the current calendar. When generating a new batch, turn on **Replace existing schedule when generating new posts** if you want the new reference-post campaign to replace old scheduled posts instead of appending to them.
+
+## Generate a month from a file
+
+Use **Upload Content Source File** to give the agent raw material such as brand notes, old captions, content pillars, a CSV of ideas, or a Word document with lessons, stories, or offers.
+
+Supported formats:
+
+```text
+.txt, .md, .csv, .json, .docx, .pdf
+```
+
+The app extracts readable text, stores it privately in `data/source-files`, and uses it to build the agent strategy, daily missions, quotes, captions, and hashtags. The default campaign length is 30 days, but you can change it in the form.
 
 ## Instagram setup notes
 

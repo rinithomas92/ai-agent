@@ -16,6 +16,7 @@ import { generateGrokImage, animateWithGrok } from './services/xai.js';
 import { publishToInstagram, validateCredentials } from './services/instagram.js';
 import { startScheduler, runDuePostsNow } from './scheduler.js';
 import { getRuntimeModes, useDemoContent, useDemoImages, useDemoPublishing } from './runtimeMode.js';
+import { getSourceFile, saveSourceFileUpload, sourceContextForPrompt } from './services/sourceFiles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -45,8 +46,12 @@ const planSchema = z.object({
   agentMode: z.boolean().default(true),
   agentGoal: z.string().max(1500).optional().default(''),
   creativePrompt: z.string().max(3000).optional().default(''),
+  referencePost: z.string().max(3000).optional().default(''),
+  referencePostImagePath: z.string().optional().nullable(),
+  replaceExistingSchedule: z.boolean().default(false),
   quoteDescription: z.string().max(1000).optional().default(''),
   backgroundDescription: z.string().max(1000).optional().default(''),
+  sourceFileId: z.string().uuid().optional().nullable(),
   animation: z.boolean().default(false),
   creatorName: z.string().min(1).default('Rini'),
   instagramHandle: z.string().min(2).default('@getholisticallyfitwithrini'),
@@ -55,6 +60,11 @@ const planSchema = z.object({
 
 const uploadSchema = z.object({
   imageData: z.string().startsWith('data:image/'),
+  filename: z.string().min(1).max(180)
+});
+
+const sourceFileUploadSchema = z.object({
+  fileData: z.string().startsWith('data:'),
   filename: z.string().min(1).max(180)
 });
 
@@ -111,10 +121,23 @@ app.post('/api/uploads', async (req, res, next) => {
   }
 });
 
-function validatePostContent(content, isDemo) {
+app.post('/api/source-files', async (req, res, next) => {
+  try {
+    const input = sourceFileUploadSchema.parse(req.body);
+    const sourceFile = await saveSourceFileUpload(input);
+    res.status(201).json(sourceFile);
+  } catch (error) {
+    next(error);
+  }
+});
+
+function validatePostContent(content, isDemo, input = {}) {
   const quoteWords = content.quote.trim().split(/\s+/).filter(Boolean).length;
-  if (quoteWords < 8 || quoteWords > 18) {
-    throw new Error(`Quote length must be between 8 and 18 words (got ${quoteWords} words: "${content.quote}").`);
+  const isScripture = isScripturePrompt(input);
+  const minWords = isScripture ? 5 : 8;
+  const maxWords = isScripture ? 28 : 18;
+  if (quoteWords < minWords || quoteWords > maxWords) {
+    throw new Error(`Quote length must be between ${minWords} and ${maxWords} words (got ${quoteWords} words: "${content.quote}").`);
   }
 
   const tags = content.hashtags || [];
@@ -135,14 +158,25 @@ app.post('/api/plan', async (req, res, next) => {
     const input = planSchema.parse(req.body);
     const postTimes = resolvePostTimes(input);
     const totalPosts = input.days * input.postsPerDay;
-    const posts = getPosts();
+    const posts = input.replaceExistingSchedule ? [] : getPosts();
     const created = [];
-    const agentStrategy = await createAgentStrategy(input);
+    const sourceFile = input.sourceFileId ? await getSourceFile(input.sourceFileId) : null;
+    if (input.sourceFileId && !sourceFile) {
+      throw new Error('Uploaded source file was not found. Please upload it again.');
+    }
+    const sourceFileContext = sourceContextForPrompt(sourceFile);
+    const agentInput = {
+      ...input,
+      sourceFile,
+      sourceFileContext,
+      sourceFileName: sourceFile?.filename || ''
+    };
+    const agentStrategy = await createAgentStrategy(agentInput);
     let sequenceIndex = 0;
 
     for (let day = 0; day < input.days; day += 1) {
       const yyyyMmDd = addDaysToDateString(input.startDate, day);
-      const dailyMission = getDailyMission(agentStrategy, day, input);
+      const dailyMission = getDailyMission(agentStrategy, day, agentInput);
 
       for (let postIndex = 0; postIndex < input.postsPerDay; postIndex += 1) {
         const scheduledAt = `${yyyyMmDd}T${postTimes[postIndex]}:00`;
@@ -154,7 +188,11 @@ app.post('/api/plan', async (req, res, next) => {
           agentStrategy,
           dailyMission,
           creativePrompt: input.creativePrompt,
+          referencePost: input.referencePost,
+          referencePostImagePath: input.referencePostImagePath,
           quoteDescription: input.quoteDescription,
+          sourceFileContext,
+          sourceFileName: sourceFile?.filename || '',
           day: sequenceIndex + 1,
           totalDays: totalPosts,
           excludeQuotes: created.map((post) => post.quote.toLowerCase())
@@ -167,12 +205,13 @@ app.post('/api/plan', async (req, res, next) => {
           }
         }
 
-        validatePostContent(content, useDemoContent());
+        validatePostContent(content, useDemoContent(), input);
 
         const brand = {
           creatorName: input.creatorName,
           instagramHandle: input.instagramHandle,
           uploadedImagePath: input.uploadedImagePath,
+          referencePostImagePath: input.referencePostImagePath,
           backgroundDescription: input.backgroundDescription
         };
         const styleVariant = sequenceIndex % 3;
@@ -183,7 +222,7 @@ app.post('/api/plan', async (req, res, next) => {
           creativePrompt: input.creativePrompt,
           ...brand
         });
-        const agentReview = reviewContent(content, input, agentStrategy, dailyMission);
+        const agentReview = reviewContent(content, agentInput, agentStrategy, dailyMission);
         const post = {
           id: randomUUID(),
           category: input.category,
@@ -196,8 +235,13 @@ app.post('/api/plan', async (req, res, next) => {
           agentQualityScore: agentReview.score,
           agentRationale: agentReview.rationale,
           creativePrompt: input.creativePrompt,
+          referencePost: input.referencePost,
+          referencePostImagePath: input.referencePostImagePath,
           quoteDescription: input.quoteDescription,
           backgroundDescription: input.backgroundDescription,
+          sourceFileId: sourceFile?.id || null,
+          sourceFileName: sourceFile?.filename || null,
+          sourceFileSummary: sourceFile?.summary || '',
           creatorName: input.creatorName,
           instagramHandle: input.instagramHandle,
           uploadedImagePath: input.uploadedImagePath,
@@ -251,19 +295,24 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       agentStrategy: post.agentStrategy || null,
       dailyMission: post.agentMission || '',
       creativePrompt: post.creativePrompt || '',
+      referencePost: post.referencePost || '',
+      referencePostImagePath: post.referencePostImagePath || null,
       quoteDescription: post.quoteDescription || '',
+      sourceFileContext: sourceContextForPrompt(await getSourceFile(post.sourceFileId)),
+      sourceFileName: post.sourceFileName || '',
       day: 1,
       totalDays: 1,
       excludeQuotes: posts.filter((p) => p.id !== post.id).map((p) => p.quote.toLowerCase())
     });
 
-    validatePostContent(content, useDemoContent());
+    validatePostContent(content, useDemoContent(), post);
 
     const card = await createQuoteCard(content, {
       category: post.category,
       creatorName: post.creatorName || 'Rini',
       instagramHandle: post.instagramHandle || '@getholisticallyfitwithrini',
       uploadedImagePath: post.uploadedImagePath,
+      referencePostImagePath: post.referencePostImagePath || null,
       backgroundDescription: post.backgroundDescription || '',
       styleVariant: post.styleVariant || 0,
       theme: post.theme || 'minimalLight',
@@ -520,6 +569,11 @@ app.post('/api/run-due', async (_req, res, next) => {
   }
 });
 
+app.delete('/api/posts', (_req, res) => {
+  savePosts([]);
+  res.status(204).end();
+});
+
 app.delete('/api/posts/:id', (req, res) => {
   const posts = getPosts();
   const nextPosts = posts.filter((post) => post.id !== req.params.id);
@@ -612,6 +666,11 @@ function buildDefaultPostTimes(count, firstTime) {
     const minutes = totalMinutes % 60;
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   });
+}
+
+function isScripturePrompt(input = {}) {
+  return /\b(bible|biblical|scripture|verse|psalm|proverb|church|jesus|christian|gospel)\b/i
+    .test(`${input.category || ''} ${input.creativePrompt || ''} ${input.quoteDescription || ''} ${input.backgroundDescription || ''}`);
 }
 
 function publicPathToFile(publicPath) {

@@ -25,6 +25,7 @@
           <div class="top-actions">
             <a id="downloadAll" class="ghost-button link-button" href="/api/download-all">Download All</a>
             <button id="runDue" class="ghost-button">Run Due Posts</button>
+            <button id="clearSchedule" class="ghost-button" type="button">Clear Schedule</button>
           </div>
         </header>
 
@@ -78,6 +79,31 @@
               <textarea name="creativePrompt" rows="6" placeholder="Optional: paste a full ChatGPT-style prompt. Example: Create premium Instagram posts for women healing from emotional burnout, with elegant magazine styling, poetic quotes, and a confident feminine voice."></textarea>
             </label>
             <label>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span>Reference Post</span>
+                <button type="button" id="clearReferencePost" class="ghost-button" style="min-height: 28px; font-size: 12px; padding: 2px 10px; border-radius: 6px;">Clear Reference</button>
+              </div>
+              <textarea name="referencePost" rows="6" placeholder="Optional: paste an example post you like. The agent will create similar posts in tone, structure, and emotional angle without copying it."></textarea>
+            </label>
+            <label>
+              Upload Reference Post Image
+              <input id="referencePostUpload" name="referencePostUpload" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <div id="referencePostPreview" class="upload-preview reference-preview">
+              <span>No reference post uploaded</span>
+            </div>
+            <label class="toggle">
+              <input name="replaceExistingSchedule" type="checkbox" />
+              <span>Replace existing schedule when generating new posts</span>
+            </label>
+            <label>
+              Upload Content Source File
+              <input id="sourceFileUpload" name="sourceFileUpload" type="file" accept=".txt,.md,.markdown,.csv,.json,.docx,.pdf,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            </label>
+            <div id="sourceFilePreview" class="upload-preview source-preview">
+              <span>No source file uploaded</span>
+            </div>
+            <label>
               Quote Description
               <textarea name="quoteDescription" rows="4" placeholder="Optional: describe the exact feeling, message, audience, or situation for the quote."></textarea>
             </label>
@@ -105,7 +131,7 @@
             <div class="two-col">
               <label>
                 Number of Days
-                <input id="daysInput" name="days" type="number" min="1" max="50" value="1" step="1" required />
+                <input id="daysInput" name="days" type="number" min="1" max="50" value="30" step="1" required />
               </label>
               <label>
                 Posts per Day
