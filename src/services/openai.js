@@ -25,6 +25,7 @@ export async function generateContentPack({
   agentStrategy = null,
   dailyMission = '',
   creativePrompt = '',
+  openAiPrompt = '',
   referencePost = '',
   referencePostImagePath = null,
   quoteDescription = '',
@@ -34,7 +35,8 @@ export async function generateContentPack({
   totalDays,
   excludeQuotes = []
 }) {
-  const scripturePrompt = isScripturePrompt({ category, creativePrompt, quoteDescription, sourceFileContext });
+  const scripturePrompt = isScripturePrompt({ category, creativePrompt, openAiPrompt, quoteDescription, sourceFileContext });
+  const luxuryProfilePrompt = isLuxuryProfilePrompt({ category, creativePrompt, openAiPrompt, quoteDescription, sourceFileContext });
   if (useDemoContent()) {
     if (scripturePrompt) {
       return getDemoScriptureContent(day, excludeQuotes);
@@ -65,6 +67,9 @@ export async function generateContentPack({
     creativePrompt
       ? `Creative prompt from user: ${creativePrompt}. Treat this as a primary instruction, not a loose suggestion. If it asks for a topic, format, reference, background, audience, or uniqueness rule, follow it.`
       : 'No broad creative prompt was provided. Innovate from the structured fields only.',
+    openAiPrompt
+      ? `Direct OpenAI prompt from user: ${openAiPrompt}. Follow this instruction closely for the quote, caption, structure, references, and uniqueness rules. If it conflicts with visual/background directions, keep this instruction for copy and use the background field for visuals.`
+      : '',
     referencePost
       ? `Reference post supplied by user. Create a similar post in tone, structure, emotional angle, and audience fit, but do not copy exact sentences, proprietary wording, or distinctive phrasing:\n${truncateForPrompt(referencePost, 2500)}`
       : '',
@@ -80,7 +85,9 @@ export async function generateContentPack({
     `Tone: ${tone}. This is day ${day} of ${totalDays}.`,
     'Return strict JSON with keys quote, caption, hashtags.',
     scripturePrompt
-      ? 'Quote: 8-28 words, include the Bible reference, and keep it readable on an Instagram graphic.'
+      ? 'Quote: include the Bible reference, then a short verse excerpt or faithful paraphrase. Aim for 8-28 words, never exceed 45 words, and keep it readable on an Instagram graphic.'
+      : luxuryProfilePrompt
+        ? 'Quote: 28-70 words, emotionally sharp psychology/self-worth style, elegant and memorable. Do not use markdown.'
       : 'Quote: 8-18 words, original, emotionally clear.',
     'Caption: 1-2 short sentences with no markdown.',
     'Hashtags: 6-10 concise tags.'
@@ -156,9 +163,14 @@ function truncateForPrompt(value, maxChars) {
   return text.length > maxChars ? `${text.slice(0, maxChars).trim()}\n...[truncated]` : text;
 }
 
-function isScripturePrompt({ category = '', creativePrompt = '', quoteDescription = '', sourceFileContext = '' }) {
+function isScripturePrompt({ category = '', creativePrompt = '', openAiPrompt = '', quoteDescription = '', sourceFileContext = '' }) {
   return /\b(bible|biblical|scripture|verse|psalm|proverb|church|jesus|christian|gospel)\b/i
-    .test(`${category} ${creativePrompt} ${quoteDescription} ${sourceFileContext}`);
+    .test(`${category} ${creativePrompt} ${openAiPrompt} ${quoteDescription} ${sourceFileContext}`);
+}
+
+function isLuxuryProfilePrompt({ category = '', creativePrompt = '', openAiPrompt = '', quoteDescription = '', sourceFileContext = '' }) {
+  return /\b(rinism|psychology|black gold|black and gold|save share like|follow for more|profile quote|luxury quote|validation|self worth)\b/i
+    .test(`${category} ${creativePrompt} ${openAiPrompt} ${quoteDescription} ${sourceFileContext}`);
 }
 
 function isRecoverableOpenAIError(error) {

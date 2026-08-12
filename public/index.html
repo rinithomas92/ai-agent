@@ -78,6 +78,13 @@
               </div>
               <textarea name="creativePrompt" rows="6" placeholder="Optional: paste a full ChatGPT-style prompt. Example: Create premium Instagram posts for women healing from emotional burnout, with elegant magazine styling, poetic quotes, and a confident feminine voice."></textarea>
             </label>
+            <div class="prompt-composer">
+              <label for="openAiPromptBox">
+                <span>ChatGPT-Style Prompt</span>
+                <small>Write naturally. The app will use this for quote copy and real AI image generation.</small>
+              </label>
+              <textarea id="openAiPromptBox" name="openAiPrompt" rows="10" placeholder="Example: Create a premium Instagram Bible verse post. Generate a real photorealistic church interior background with large stained-glass windows, visible chapel arches, wooden pews, altar details, a cross, warm candlelight, and cinematic golden lighting. Add a short Bible verse quote with book, chapter, and verse reference. Blend my uploaded portrait naturally into the scene. No text inside the generated background image."></textarea>
+            </div>
             <label>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                 <span>Reference Post</span>
@@ -122,7 +129,7 @@
               </label>
             </div>
             <label>
-              Upload Portrait or Brand Image
+              Upload Logo / Profile / Brand Image
               <input id="imageUpload" name="imageUpload" type="file" accept="image/png,image/jpeg,image/webp" />
             </label>
             <div id="uploadPreview" class="upload-preview">
@@ -206,6 +213,70 @@
             <button id="refresh" class="ghost-button">Refresh</button>
           </div>
           <div id="calendar" class="calendar"></div>
+        </section>
+
+        <section class="panel youtube-panel">
+          <div class="panel-heading">
+            <h2>YouTube Cartoon Agent</h2>
+            <p>Select a theme and let the LLM create a short cartoon storyboard and animated video preview.</p>
+          </div>
+          <form id="cartoonForm" class="cartoon-form">
+            <div class="two-col">
+              <label>
+                Theme
+                <input name="theme" value="Kindness and confidence" required />
+              </label>
+              <label>
+                Audience
+                <input name="audience" value="kids and families" required />
+              </label>
+            </div>
+            <div class="two-col">
+              <label>
+                Duration
+                <select name="duration">
+                  <option value="30">30 seconds</option>
+                  <option value="45">45 seconds</option>
+                  <option value="60">60 seconds</option>
+                  <option value="90">90 seconds</option>
+                  <option value="120">2 minutes</option>
+                </select>
+              </label>
+              <label>
+                Cartoon Style
+                <select name="style">
+                  <option>Colorful 2D cartoon</option>
+                  <option>Pastel storybook cartoon</option>
+                  <option>Dark cozy fairytale cartoon</option>
+                  <option>Bright educational cartoon</option>
+                </select>
+              </label>
+            </div>
+            <div class="two-col">
+              <label>
+                Number of Days
+                <input name="days" type="number" min="1" max="30" value="7" step="1" required />
+              </label>
+              <label class="toggle cartoon-voice-toggle">
+                <input name="voice" type="checkbox" checked />
+                <span>Add AI voiceover</span>
+              </label>
+            </div>
+            <label>
+              Upload Character / Reference Image
+              <input id="cartoonImageUpload" name="cartoonImageUpload" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <div id="cartoonImagePreview" class="upload-preview">
+              <span>No cartoon image uploaded</span>
+            </div>
+            <label>
+              LLM Video Prompt
+              <textarea name="prompt" rows="5" placeholder="Optional: describe characters, lesson, setting, voiceover style, and the kind of YouTube cartoon you want."></textarea>
+            </label>
+            <button class="primary-button" type="submit">Create YouTube Cartoon Video</button>
+            <p id="cartoonStatus" class="status-line"></p>
+          </form>
+          <div id="cartoonPreview" class="empty-state">Create a cartoon video to preview it here.</div>
         </section>
       </section>
     </main>

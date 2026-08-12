@@ -3,7 +3,8 @@ const state = {
   selectedId: null,
   uploadedImage: null,
   uploadedReferencePost: null,
-  uploadedSourceFile: null
+  uploadedSourceFile: null,
+  uploadedCartoonImage: null
 };
 
 const els = {
@@ -28,7 +29,12 @@ const els = {
   daysInput: document.querySelector('#daysInput'),
   postsPerDayInput: document.querySelector('#postsPerDayInput'),
   postTimesContainer: document.querySelector('#postTimesContainer'),
-  scheduleSummary: document.querySelector('#scheduleSummary')
+  scheduleSummary: document.querySelector('#scheduleSummary'),
+  cartoonForm: document.querySelector('#cartoonForm'),
+  cartoonStatus: document.querySelector('#cartoonStatus'),
+  cartoonPreview: document.querySelector('#cartoonPreview'),
+  cartoonImageUpload: document.querySelector('#cartoonImageUpload'),
+  cartoonImagePreview: document.querySelector('#cartoonImagePreview')
 };
 
 document.querySelector('[name="startDate"]').valueAsDate = new Date();
@@ -85,6 +91,23 @@ els.sourceFileUpload.addEventListener('change', () => {
   `;
 });
 
+els.cartoonImageUpload.addEventListener('change', () => {
+  const file = els.cartoonImageUpload.files?.[0];
+  state.uploadedCartoonImage = null;
+  if (!file) {
+    els.cartoonImagePreview.innerHTML = '<span>No cartoon image uploaded</span>';
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  els.cartoonImagePreview.innerHTML = `
+    <img src="${url}" alt="Cartoon reference preview">
+    <div>
+      <strong>${escapeHtml(file.name)}</strong>
+      <p class="meta">This image will be blended into each generated cartoon video.</p>
+    </div>
+  `;
+});
+
 els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.form));
@@ -111,18 +134,7 @@ els.form.addEventListener('submit', async (event) => {
       throw new Error('Each daily post must have a different posting time.');
     }
 
-    const file = els.imageUpload.files?.[0];
-    if (file) {
-      els.status.textContent = 'Uploading image...';
-      const imageData = await readFileAsDataUrl(file);
-      state.uploadedImage = await api('/api/uploads', {
-        method: 'POST',
-        body: JSON.stringify({ imageData, filename: file.name })
-      });
-      data.uploadedImagePath = state.uploadedImage.publicPath;
-    } else if (state.uploadedImage?.publicPath) {
-      data.uploadedImagePath = state.uploadedImage.publicPath;
-    }
+    data.uploadedImagePath = await ensureUploadedPortrait();
 
     const referencePostFile = els.referencePostUpload.files?.[0];
     if (referencePostFile) {
@@ -168,6 +180,7 @@ els.form.addEventListener('submit', async (event) => {
     els.status.textContent = `Agent is creating ${totalPosts} post${totalPosts === 1 ? '' : 's'}${data.sourceFileId ? ' from your source file' : ''}...`;
     const created = await api('/api/plan', { method: 'POST', body: JSON.stringify(data) });
     els.status.textContent = `${created.length} post${created.length === 1 ? '' : 's'} scheduled successfully.`;
+    state.selectedId = created[0]?.id || null;
     await loadPosts();
   } catch (error) {
     els.status.textContent = error.message;
@@ -179,6 +192,20 @@ els.runDue.addEventListener('click', async () => {
   await api('/api/run-due', { method: 'POST' });
   await loadPosts();
 });
+
+async function ensureUploadedPortrait() {
+  const file = els.imageUpload.files?.[0];
+  if (file) {
+    els.status.textContent = 'Uploading image...';
+    const imageData = await readFileAsDataUrl(file);
+    state.uploadedImage = await api('/api/uploads', {
+      method: 'POST',
+      body: JSON.stringify({ imageData, filename: file.name })
+    });
+    return state.uploadedImage.publicPath;
+  }
+  return state.uploadedImage?.publicPath || null;
+}
 
 els.clearSchedule.addEventListener('click', async () => {
   const confirmed = window.confirm('Clear all scheduled posts? This cannot be undone.');
@@ -194,6 +221,72 @@ els.clearSchedule.addEventListener('click', async () => {
     els.status.textContent = error.message;
   }
 });
+
+els.cartoonForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(els.cartoonForm));
+  data.duration = Number(data.duration);
+  data.days = Number(data.days);
+  data.voice = Boolean(data.voice);
+  delete data.cartoonImageUpload;
+  els.cartoonStatus.textContent = `Creating ${data.days} cartoon video${data.days === 1 ? '' : 's'}${data.voice ? ' with voiceover' : ''}...`;
+  try {
+    data.uploadedImagePath = await ensureUploadedCartoonImage();
+    const result = await api('/api/youtube-cartoon', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+    els.cartoonStatus.textContent = `${result.count} cartoon video${result.count === 1 ? '' : 's'} created.`;
+    els.cartoonPreview.className = 'cartoon-result';
+    const items = result.results || [result];
+    els.cartoonPreview.innerHTML = `
+      ${items.map((item) => `
+        <article class="cartoon-day-card">
+          <div class="cartoon-video-frame">
+            <iframe src="${item.playerPath || item.videoPath}" title="Day ${item.dayNumber} cartoon video preview"></iframe>
+          </div>
+          <div class="cartoon-day-copy">
+            <p class="eyebrow">Day ${item.dayNumber}</p>
+            <h3>${escapeHtml(item.title)}</h3>
+            <p>${escapeHtml(item.description)}</p>
+            <p class="meta">Duration: ${escapeHtml(String(item.duration))} seconds${item.audioPath ? ' with voiceover' : ''}</p>
+            ${item.voiceError ? `<p class="meta">Voiceover skipped: ${escapeHtml(item.voiceError)}</p>` : ''}
+            <div class="cartoon-actions">
+              <a class="ghost-button link-button" href="${item.playerPath || item.videoPath}" target="_blank">Open Video Player</a>
+              <a class="ghost-button link-button" href="${item.videoPath}" download="youtube-cartoon-day-${item.dayNumber}.svg">Download Animation</a>
+              ${item.audioPath ? `<a class="ghost-button link-button" href="${item.audioPath}" download="youtube-cartoon-day-${item.dayNumber}-voice.mp3">Download Voice</a>` : ''}
+            </div>
+            <div class="storyboard-list">
+              ${item.scenes.map((scene, index) => `
+                <article>
+                  <strong>Scene ${index + 1}: ${escapeHtml(scene.onScreenText)}</strong>
+                  <p>${escapeHtml(scene.narration)}</p>
+                  <p class="meta">${escapeHtml(scene.visual)}</p>
+                </article>
+              `).join('')}
+            </div>
+          </div>
+        </article>
+      `).join('')}
+    `;
+  } catch (error) {
+    els.cartoonStatus.textContent = error.message;
+  }
+});
+
+async function ensureUploadedCartoonImage() {
+  const file = els.cartoonImageUpload.files?.[0];
+  if (file) {
+    els.cartoonStatus.textContent = 'Uploading cartoon image...';
+    const imageData = await readFileAsDataUrl(file);
+    state.uploadedCartoonImage = await api('/api/uploads', {
+      method: 'POST',
+      body: JSON.stringify({ imageData, filename: file.name })
+    });
+    return state.uploadedCartoonImage.publicPath;
+  }
+  return state.uploadedCartoonImage?.publicPath || null;
+}
 
 els.clearReferencePost.addEventListener('click', () => {
   els.form.querySelector('[name="referencePost"]').value = '';

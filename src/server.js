@@ -11,7 +11,9 @@ import { z } from 'zod';
 import { getPosts, savePosts, getSettings, saveSettings } from './store.js';
 import { generateContentPack } from './services/openai.js';
 import { createAgentStrategy, getDailyMission, reviewContent } from './services/agent.js';
-import { createQuoteCard } from './services/renderCard.js';
+import { createPhotoQuoteCard, createQuoteCard } from './services/renderCard.js';
+import { generateOpenAIBackgroundImage } from './services/openaiImage.js';
+import { createCartoonVideo, generateCartoonStoryboard, generateCartoonVoiceover } from './services/cartoonVideo.js';
 import { generateGrokImage, animateWithGrok } from './services/xai.js';
 import { publishToInstagram, validateCredentials } from './services/instagram.js';
 import { startScheduler, runDuePostsNow } from './scheduler.js';
@@ -46,6 +48,7 @@ const planSchema = z.object({
   agentMode: z.boolean().default(true),
   agentGoal: z.string().max(1500).optional().default(''),
   creativePrompt: z.string().max(3000).optional().default(''),
+  openAiPrompt: z.string().max(3000).optional().default(''),
   referencePost: z.string().max(3000).optional().default(''),
   referencePostImagePath: z.string().optional().nullable(),
   replaceExistingSchedule: z.boolean().default(false),
@@ -66,6 +69,28 @@ const uploadSchema = z.object({
 const sourceFileUploadSchema = z.object({
   fileData: z.string().startsWith('data:'),
   filename: z.string().min(1).max(180)
+});
+
+const promptImageSchema = z.object({
+  prompt: z.string().min(2).max(3000),
+  count: z.coerce.number().int().min(1).max(10).default(1),
+  category: z.string().min(2).default('Daily Quote'),
+  tone: z.string().min(2).default('Inspirational'),
+  theme: z.string().min(2).default('minimalDark'),
+  creatorName: z.string().min(1).default('Rini'),
+  instagramHandle: z.string().min(2).default('@getholisticallyfitwithrini'),
+  uploadedImagePath: z.string().optional().nullable()
+});
+
+const cartoonVideoSchema = z.object({
+  theme: z.string().min(2).max(300),
+  audience: z.string().min(2).max(120).default('kids and families'),
+  duration: z.coerce.number().int().min(15).max(120).default(30),
+  style: z.string().min(2).max(120).default('colorful 2D cartoon'),
+  days: z.coerce.number().int().min(1).max(30).default(1),
+  voice: z.boolean().default(true),
+  prompt: z.string().max(2000).optional().default(''),
+  uploadedImagePath: z.string().optional().nullable()
 });
 
 app.get('/api/health', (_req, res) => {
@@ -131,11 +156,136 @@ app.post('/api/source-files', async (req, res, next) => {
   }
 });
 
+app.post('/api/prompt-image', async (req, res, next) => {
+  try {
+    const input = promptImageSchema.parse(req.body);
+    const results = [];
+    const excludeQuotes = [];
+    for (let index = 0; index < input.count; index += 1) {
+      let realBackground = null;
+      let imageGenerationMode = 'svg-demo';
+      let imageGenerationError = '';
+      const variantPrompt = [
+        input.prompt,
+        input.count > 1
+          ? `Create post ${index + 1} of ${input.count}. Make the quote unique and create a different background composition, camera angle, lighting, and visual details from the other posts.`
+          : ''
+      ].join('\n');
+      const content = await generateContentPack({
+        category: input.category,
+        tone: input.tone,
+        agentMode: false,
+        creativePrompt: variantPrompt,
+        openAiPrompt: variantPrompt,
+        quoteDescription: variantPrompt,
+        day: index + 1,
+        totalDays: input.count,
+        excludeQuotes
+      });
+      excludeQuotes.push(content.quote.toLowerCase());
+
+      if (process.env.OPENAI_API_KEY) {
+        try {
+          realBackground = await generateOpenAIBackgroundImage(variantPrompt, {
+            uploadedImagePath: input.uploadedImagePath
+          });
+          imageGenerationMode = 'openai-real-image';
+        } catch (error) {
+          imageGenerationError = error.message;
+        }
+      }
+
+      const cardOptions = {
+        category: input.category,
+        creatorName: input.creatorName,
+        instagramHandle: input.instagramHandle,
+        uploadedImagePath: input.uploadedImagePath,
+        backgroundDescription: variantPrompt,
+        creativePrompt: variantPrompt,
+        openAiPrompt: variantPrompt,
+        styleVariant: (Date.now() + index) % 9,
+        theme: input.theme
+      };
+      const card = realBackground
+        ? await createPhotoQuoteCard(content, { ...cardOptions, backgroundImagePath: realBackground.publicPath })
+        : await createQuoteCard(content, cardOptions);
+
+      results.push({
+        quote: content.quote,
+        caption: content.caption,
+        hashtags: content.hashtags,
+        imagePath: card.publicPath,
+        imageUrl: card.publicUrl,
+        backgroundImagePath: realBackground?.publicPath || null,
+        generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
+        imageGenerationMode,
+        imageGenerationError
+      });
+    }
+
+    res.status(201).json({ count: results.length, results, ...results[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/youtube-cartoon', async (req, res, next) => {
+  try {
+    const input = cartoonVideoSchema.parse(req.body);
+    const results = [];
+    for (let index = 0; index < input.days; index += 1) {
+      const dayNumber = index + 1;
+      const storyboard = await generateCartoonStoryboard({
+        ...input,
+        dayNumber,
+        totalDays: input.days,
+        prompt: [
+          input.prompt,
+          input.days > 1 ? `Create day ${dayNumber} of ${input.days}. The plot, hook, visual setting, and lesson should feel fresh for this day.` : ''
+        ].filter(Boolean).join('\n')
+      });
+
+      let voiceover = null;
+      let voiceError = '';
+      if (input.voice) {
+        try {
+          voiceover = await generateCartoonVoiceover(storyboard, input);
+        } catch (error) {
+          voiceError = error.message;
+        }
+      }
+
+      const video = await createCartoonVideo(storyboard, {
+        ...input,
+        audioPath: voiceover?.publicPath || null
+      });
+      results.push({
+        ...storyboard,
+        dayNumber,
+        videoPath: video.publicPath,
+        videoUrl: video.publicUrl,
+        playerPath: video.playerPublicPath,
+        playerUrl: video.playerPublicUrl,
+        audioPath: voiceover?.publicPath || null,
+        audioUrl: voiceover?.publicUrl || null,
+        narrationText: voiceover?.narrationText || null,
+        voiceError,
+        duration: video.totalDuration
+      });
+    }
+
+    res.status(201).json({ count: results.length, results, ...results[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 function validatePostContent(content, isDemo, input = {}) {
   const quoteWords = content.quote.trim().split(/\s+/).filter(Boolean).length;
   const isScripture = isScripturePrompt(input);
+  const isLuxuryProfile = isLuxuryProfilePrompt(input);
   const minWords = isScripture ? 5 : 8;
-  const maxWords = isScripture ? 28 : 18;
+  const maxWords = isScripture ? 45 : isLuxuryProfile ? 90 : 18;
   if (quoteWords < minWords || quoteWords > maxWords) {
     throw new Error(`Quote length must be between ${minWords} and ${maxWords} words (got ${quoteWords} words: "${content.quote}").`);
   }
@@ -151,6 +301,46 @@ function validatePostContent(content, isDemo, input = {}) {
       throw new Error(`Hashtag count in Demo Mode must be between 8 and 12 (got ${tags.length}).`);
     }
   }
+}
+
+async function createScheduledPostCard(content, options) {
+  let realBackground = null;
+  let imageGenerationMode = 'svg-demo';
+  let imageGenerationError = '';
+  const visualPrompt = options.visualPrompt || options.backgroundDescription || options.openAiPrompt || options.creativePrompt || '';
+
+  if (shouldGenerateRealImage(visualPrompt)) {
+    try {
+      realBackground = await generateOpenAIBackgroundImage(visualPrompt, {
+        uploadedImagePath: options.uploadedImagePath
+      });
+      imageGenerationMode = 'openai-real-image';
+    } catch (error) {
+      imageGenerationError = error.message;
+    }
+  }
+
+  const card = realBackground
+    ? await createPhotoQuoteCard(content, { ...options, backgroundImagePath: realBackground.publicPath })
+    : await createQuoteCard(content, options);
+
+  return {
+    card,
+    backgroundImagePath: realBackground?.publicPath || null,
+    imageGenerationMode,
+    imageGenerationError
+  };
+}
+
+function shouldGenerateRealImage(prompt = '') {
+  return Boolean(process.env.OPENAI_API_KEY)
+    && !/\b(rinism|psychology|black gold|black and gold|save share like|follow for more|profile quote|logo post|luxury quote)\b/i.test(prompt)
+    && /\b(real|photorealistic|photo|image|background|church|cathedral|chapel|stained glass|portrait|scene|cinematic|interior|exterior|beach|forest|city|studio|garden|palace|hotel)\b/i.test(prompt);
+}
+
+function isLuxuryProfilePrompt(input = {}) {
+  return /\b(rinism|psychology|black gold|black and gold|save share like|follow for more|profile quote|luxury quote|validation|self worth)\b/i
+    .test(`${input.category || ''} ${input.creativePrompt || ''} ${input.openAiPrompt || ''} ${input.quoteDescription || ''} ${input.backgroundDescription || ''}`);
 }
 
 app.post('/api/plan', async (req, res, next) => {
@@ -188,6 +378,7 @@ app.post('/api/plan', async (req, res, next) => {
           agentStrategy,
           dailyMission,
           creativePrompt: input.creativePrompt,
+          openAiPrompt: input.openAiPrompt,
           referencePost: input.referencePost,
           referencePostImagePath: input.referencePostImagePath,
           quoteDescription: input.quoteDescription,
@@ -212,14 +403,24 @@ app.post('/api/plan', async (req, res, next) => {
           instagramHandle: input.instagramHandle,
           uploadedImagePath: input.uploadedImagePath,
           referencePostImagePath: input.referencePostImagePath,
-          backgroundDescription: input.backgroundDescription
+          backgroundDescription: input.backgroundDescription || input.creativePrompt || input.openAiPrompt,
+          openAiPrompt: input.openAiPrompt
         };
-        const styleVariant = sequenceIndex % 3;
-        const card = await createQuoteCard(content, {
+        const styleVariant = sequenceIndex % 9;
+        const visualPrompt = [
+          input.backgroundDescription || '',
+          input.openAiPrompt || '',
+          input.creativePrompt || '',
+          totalPosts > 1
+            ? `Post ${sequenceIndex + 1} of ${totalPosts}: make the background composition, camera angle, lighting, and details different from the other posts.`
+            : ''
+        ].filter(Boolean).join('\n');
+        const cardResult = await createScheduledPostCard(content, {
           category: input.category,
           styleVariant,
           theme: input.theme,
           creativePrompt: input.creativePrompt,
+          visualPrompt,
           ...brand
         });
         const agentReview = reviewContent(content, agentInput, agentStrategy, dailyMission);
@@ -235,10 +436,11 @@ app.post('/api/plan', async (req, res, next) => {
           agentQualityScore: agentReview.score,
           agentRationale: agentReview.rationale,
           creativePrompt: input.creativePrompt,
+          openAiPrompt: input.openAiPrompt,
           referencePost: input.referencePost,
           referencePostImagePath: input.referencePostImagePath,
           quoteDescription: input.quoteDescription,
-          backgroundDescription: input.backgroundDescription,
+          backgroundDescription: input.backgroundDescription || input.creativePrompt || input.openAiPrompt,
           sourceFileId: sourceFile?.id || null,
           sourceFileName: sourceFile?.filename || null,
           sourceFileSummary: sourceFile?.summary || '',
@@ -258,9 +460,11 @@ app.post('/api/plan', async (req, res, next) => {
           caption: content.caption,
           hashtags: content.hashtags,
           generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
-          imageGenerationMode: 'svg-demo',
-          imagePath: card.publicPath,
-          imageUrl: card.publicUrl,
+          imageGenerationMode: cardResult.imageGenerationMode,
+          imageGenerationError: cardResult.imageGenerationError,
+          backgroundImagePath: cardResult.backgroundImagePath,
+          imagePath: cardResult.card.publicPath,
+          imageUrl: cardResult.card.publicUrl,
           grokImageUrl: null,
           videoUrl: null,
           instagramMediaId: null,
@@ -295,6 +499,7 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       agentStrategy: post.agentStrategy || null,
       dailyMission: post.agentMission || '',
       creativePrompt: post.creativePrompt || '',
+      openAiPrompt: post.openAiPrompt || '',
       referencePost: post.referencePost || '',
       referencePostImagePath: post.referencePostImagePath || null,
       quoteDescription: post.quoteDescription || '',
@@ -307,16 +512,18 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
 
     validatePostContent(content, useDemoContent(), post);
 
-    const card = await createQuoteCard(content, {
+    const cardResult = await createScheduledPostCard(content, {
       category: post.category,
       creatorName: post.creatorName || 'Rini',
       instagramHandle: post.instagramHandle || '@getholisticallyfitwithrini',
       uploadedImagePath: post.uploadedImagePath,
       referencePostImagePath: post.referencePostImagePath || null,
-      backgroundDescription: post.backgroundDescription || '',
+      backgroundDescription: post.backgroundDescription || post.creativePrompt || '',
       styleVariant: post.styleVariant || 0,
       theme: post.theme || 'minimalLight',
-      creativePrompt: post.creativePrompt || ''
+      creativePrompt: post.creativePrompt || '',
+      openAiPrompt: post.openAiPrompt || '',
+      visualPrompt: [post.backgroundDescription || '', post.openAiPrompt || '', post.creativePrompt || ''].filter(Boolean).join('\n')
     });
     const agentReview = reviewContent(content, {
       category: post.category,
@@ -328,11 +535,13 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       caption: content.caption,
       hashtags: content.hashtags,
       generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
-      imageGenerationMode: 'svg-demo',
+      imageGenerationMode: cardResult.imageGenerationMode,
+      imageGenerationError: cardResult.imageGenerationError,
+      backgroundImagePath: cardResult.backgroundImagePath,
       agentQualityScore: agentReview.score,
       agentRationale: agentReview.rationale,
-      imagePath: card.publicPath,
-      imageUrl: card.publicUrl,
+      imagePath: cardResult.card.publicPath,
+      imageUrl: cardResult.card.publicUrl,
       status: post.status === 'failed' ? 'scheduled' : post.status,
       error: null,
       updatedAt: new Date().toISOString()
@@ -670,7 +879,7 @@ function buildDefaultPostTimes(count, firstTime) {
 
 function isScripturePrompt(input = {}) {
   return /\b(bible|biblical|scripture|verse|psalm|proverb|church|jesus|christian|gospel)\b/i
-    .test(`${input.category || ''} ${input.creativePrompt || ''} ${input.quoteDescription || ''} ${input.backgroundDescription || ''}`);
+    .test(`${input.category || ''} ${input.creativePrompt || ''} ${input.openAiPrompt || ''} ${input.quoteDescription || ''} ${input.backgroundDescription || ''}`);
 }
 
 function publicPathToFile(publicPath) {
