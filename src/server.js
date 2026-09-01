@@ -350,6 +350,7 @@ app.post('/api/plan', async (req, res, next) => {
     const totalPosts = input.days * input.postsPerDay;
     const posts = input.replaceExistingSchedule ? [] : getPosts();
     const created = [];
+    const campaignId = randomUUID();
     const sourceFile = input.sourceFileId ? await getSourceFile(input.sourceFileId) : null;
     if (input.sourceFileId && !sourceFile) {
       throw new Error('Uploaded source file was not found. Please upload it again.');
@@ -426,6 +427,7 @@ app.post('/api/plan', async (req, res, next) => {
         const agentReview = reviewContent(content, agentInput, agentStrategy, dailyMission);
         const post = {
           id: randomUUID(),
+          campaignId,
           category: input.category,
           tone: input.tone,
           theme: input.theme,
@@ -452,6 +454,8 @@ app.post('/api/plan', async (req, res, next) => {
           dayNumber: day + 1,
           postNumberForDay: postIndex + 1,
           postTime: postTimes[postIndex],
+          regenerationHistory: [],
+          regenerationCount: 0,
           styleVariant,
           scheduledAt,
           status: 'scheduled',
@@ -485,11 +489,57 @@ app.post('/api/plan', async (req, res, next) => {
   }
 });
 
+
+function buildRegenerationExclusions(posts, post) {
+  const currentCampaignQuotes = posts
+    .filter((item) => !post.campaignId || item.campaignId === post.campaignId || item.id === post.id)
+    .map((item) => item.quote);
+  const historicalQuotes = Array.isArray(post.regenerationHistory)
+    ? post.regenerationHistory.map((item) => typeof item === 'string' ? item : item?.quote).filter(Boolean)
+    : [];
+
+  return [...new Set([...currentCampaignQuotes, ...historicalQuotes]
+    .map((quote) => String(quote || '').trim().toLowerCase())
+    .filter(Boolean))];
+}
+
+function appendRegenerationHistory(post) {
+  const history = Array.isArray(post.regenerationHistory) ? [...post.regenerationHistory] : [];
+  const currentQuote = String(post.quote || '').trim();
+  const alreadyStored = history.some((item) => {
+    const quote = typeof item === 'string' ? item : item?.quote;
+    return String(quote || '').trim().toLowerCase() === currentQuote.toLowerCase();
+  });
+
+  if (currentQuote && !alreadyStored) {
+    history.push({
+      quote: currentQuote,
+      caption: post.caption || '',
+      hashtags: Array.isArray(post.hashtags) ? [...post.hashtags] : [],
+      imagePath: post.imagePath || null,
+      imageUrl: post.imageUrl || null,
+      generationMode: post.generationMode || null,
+      replacedAt: new Date().toISOString()
+    });
+  }
+
+  // A generous cap keeps the persisted JSON bounded while still preventing
+  // practical repetition during long editing sessions.
+  return history.slice(-100);
+}
+
 app.post('/api/posts/:id/regenerate', async (req, res, next) => {
   try {
     const posts = getPosts();
     const post = posts.find((item) => item.id === req.params.id);
     if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    const campaignSequence = post.dayNumber && post.postNumberForDay && post.postsPerDay
+      ? ((post.dayNumber - 1) * post.postsPerDay) + post.postNumberForDay
+      : 1;
+    const campaignTotal = post.campaignDays && post.postsPerDay
+      ? post.campaignDays * post.postsPerDay
+      : 1;
 
     const content = await generateContentPack({
       category: post.category,
@@ -505,9 +555,12 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       quoteDescription: post.quoteDescription || '',
       sourceFileContext: sourceContextForPrompt(await getSourceFile(post.sourceFileId)),
       sourceFileName: post.sourceFileName || '',
-      day: 1,
-      totalDays: 1,
-      excludeQuotes: posts.filter((p) => p.id !== post.id).map((p) => p.quote.toLowerCase())
+      day: campaignSequence,
+      totalDays: campaignTotal,
+      // Exclude every current campaign quote plus every earlier version of this post.
+      // This prevents Demo Mode from bouncing A↔B and gives live OpenAI a durable
+      // "never reuse these versions" history across repeated regenerations/restarts.
+      excludeQuotes: buildRegenerationExclusions(posts, post)
     });
 
     validatePostContent(content, useDemoContent(), post);
@@ -530,6 +583,8 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       tone: post.tone,
       instagramHandle: post.instagramHandle || '@getholisticallyfitwithrini'
     }, post.agentStrategy || null, post.agentMission || '');
+
+    const regenerationHistory = appendRegenerationHistory(post);
     Object.assign(post, {
       quote: content.quote,
       caption: content.caption,
@@ -542,6 +597,8 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       agentRationale: agentReview.rationale,
       imagePath: cardResult.card.publicPath,
       imageUrl: cardResult.card.publicUrl,
+      regenerationHistory,
+      regenerationCount: regenerationHistory.length,
       status: post.status === 'failed' ? 'scheduled' : post.status,
       error: null,
       updatedAt: new Date().toISOString()

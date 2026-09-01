@@ -10,7 +10,9 @@ export async function createAgentStrategy(input) {
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const prompt = [
-    'Act as an autonomous Instagram content strategist for a personal brand.',
+    'Act as a critical-thinking partner and autonomous Instagram content strategist for a personal brand.',
+    'Do not blindly agree with the user\'s premise, category, creative direction, or goals.',
+    'Internally evaluate creator inputs, challenge their assumptions, facts, missing perspectives, and potential biases to create an intellectually stronger and more accurate strategy.',
     `Brand/creator: ${input.creatorName} (${input.instagramHandle}).`,
     `Category: ${input.category}. Tone: ${input.tone}.`,
     input.agentGoal ? `Brand goal: ${input.agentGoal}.` : 'Brand goal: grow trust, saves, and daily engagement.',
@@ -23,6 +25,7 @@ export async function createAgentStrategy(input) {
       ? `Uploaded source material to mine for themes, language, ideas, and monthly content angles:\n${truncateForPrompt(input.sourceFileContext, 12000)}`
       : '',
     `Create a ${input.days}-day content strategy.`,
+    'dailyMissions should challenge typical assumptions and guide content toward deep, psychological reframes rather than generic motivational copy.',
     'Return strict JSON with strategySummary, audienceInsight, contentPillars, and dailyMissions.',
     'dailyMissions must contain one short mission per day.'
   ].filter(Boolean).join('\n');

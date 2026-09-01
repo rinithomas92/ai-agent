@@ -531,3 +531,134 @@ textarea {
     border-right: 0;
   }
 }
+
+/* Campaign Previews Styling */
+.preview-divider {
+  border: 0;
+  border-top: 1px solid #2d3045;
+  margin: 24px 0;
+}
+
+.campaign-previews-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.campaign-preview-day-selector {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.campaign-preview-day-selector label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #8f96aa;
+}
+
+.campaign-preview-date-select {
+  width: 100%;
+  background: rgba(11, 13, 24, 0.8);
+  color: #f8fafc;
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+
+.campaign-date-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c4b5fd;
+  border-left: 3px solid #7c3aed;
+  padding-left: 8px;
+  margin-bottom: 4px;
+}
+
+.campaign-previews-list {
+  max-height: 450px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 6px;
+}
+
+.campaign-previews-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.campaign-previews-list::-webkit-scrollbar-track {
+  background: rgba(11, 13, 24, 0.5);
+  border-radius: 4px;
+}
+
+.campaign-previews-list::-webkit-scrollbar-thumb {
+  background: #2d3045;
+  border-radius: 4px;
+}
+
+.campaign-previews-list::-webkit-scrollbar-thumb:hover {
+  background: #4b4f70;
+}
+
+.campaign-day-posts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.campaign-post-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(11, 13, 24, 0.6);
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.campaign-post-card:hover {
+  background: rgba(23, 23, 42, 0.8);
+  border-color: #5b7cfa;
+  transform: translateY(-1px);
+}
+
+.campaign-post-card.active {
+  background: rgba(124, 58, 237, 0.15);
+  border-color: #7c3aed;
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.25);
+}
+
+.campaign-post-thumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #2d3045;
+  flex-shrink: 0;
+}
+
+.campaign-post-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex-grow: 1;
+}
+
+.campaign-post-meta {
+  font-size: 11px;
+  color: #8f96aa;
+}
+
+.campaign-post-hook {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

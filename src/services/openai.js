@@ -54,8 +54,13 @@ export async function generateContentPack({
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const prompt = [
+    'You are a critical-thinking partner, not an agreement machine. You must NOT blindly validate or agree with the user\'s premise or input idea.',
+    'Before generating the post copy, internally evaluate: What are the actual facts? What assumptions is the user making? What information/perspective is missing? What is the strongest opposing interpretation? Is there confirmation bias or exaggeration? How can the idea be made more accurate and intellectually stronger?',
+    'Keep this reasoning internal. Do not expose chain-of-thought or hidden reasoning in the final JSON output.',
+    'When appropriate, structure the generated post copy (using the quote and caption fields) to follow this framework: Hook → Problem/Bias → Reframe → Better Question/Prompt → Strong Close.',
+    'Ensure the content feels intelligent, psychologically insightful, concise, challenging, thought-provoking, and useful (not preachy, generic, or blindly supportive).',
     agentMode
-      ? 'You are the creator agent for this Instagram brand. Make a deliberate content decision, then produce the post copy.'
+      ? 'You are the creator agent for this Instagram brand. Make a deliberate, critical-thinking content decision, then produce the post copy.'
       : 'Create one Instagram quote post.',
     `Category: ${category}.`,
     agentGoal ? `Agent goal: ${agentGoal}.` : '',
@@ -65,7 +70,7 @@ export async function generateContentPack({
       ? `Uploaded source file context${sourceFileName ? ` from ${sourceFileName}` : ''}. Use it as the main raw material for this post. Do not copy long passages verbatim; transform its ideas into original Instagram content:\n${truncateForPrompt(sourceFileContext, 8000)}`
       : '',
     creativePrompt
-      ? `Creative prompt from user: ${creativePrompt}. Treat this as a primary instruction, not a loose suggestion. If it asks for a topic, format, reference, background, audience, or uniqueness rule, follow it.`
+      ? `Creative prompt from user: ${creativePrompt}. Treat this as a primary instruction, not a loose suggestion. If it asks for a topic, format, reference, background, audience, or uniqueness rule, follow it. Interpret this direction critically, challenge weak ideas, and innovate within this direction while keeping the final quote concise and original.`
       : 'No broad creative prompt was provided. Innovate from the structured fields only.',
     openAiPrompt
       ? `Direct OpenAI prompt from user: ${openAiPrompt}. Follow this instruction closely for the quote, caption, structure, references, and uniqueness rules. If it conflicts with visual/background directions, keep this instruction for copy and use the background field for visuals.`
@@ -77,8 +82,11 @@ export async function generateContentPack({
       ? 'A reference post image is attached. Study its composition, spacing, typography mood, color direction, image/text balance, and premium feel. Use it as inspiration only; do not copy the design exactly.'
       : '',
     quoteDescription
-      ? `Specific quote direction: ${quoteDescription}. Follow this direction closely while keeping the quote original.`
+      ? `Specific quote direction: ${quoteDescription}. Challenge the assumptions of this direction if needed, while keeping the quote original.`
       : 'No specific quote direction was provided. Use only the category to decide the quote idea.',
+    excludeQuotes.length
+      ? `Do not repeat or closely paraphrase any of these earlier/current quotes. Choose a genuinely new angle, hook, wording, and reframe: ${uniqueQuoteExclusions(excludeQuotes).slice(-60).map((quote) => `"${quote}"`).join(' | ')}`
+      : '',
     scripturePrompt
       ? 'The user is asking for Bible verse posts. Make every post unique. Include a Bible book/chapter/verse reference in the quote itself, such as "Psalm 46:10 - Be still and know that He is God." Use respectful Christian wording, and do not invent fake references.'
       : '',
@@ -88,8 +96,8 @@ export async function generateContentPack({
       ? 'Quote: include the Bible reference, then a short verse excerpt or faithful paraphrase. Aim for 8-28 words, never exceed 45 words, and keep it readable on an Instagram graphic.'
       : luxuryProfilePrompt
         ? 'Quote: 28-70 words, emotionally sharp psychology/self-worth style, elegant and memorable. Do not use markdown.'
-      : 'Quote: 8-18 words, original, emotionally clear.',
-    'Caption: 1-2 short sentences with no markdown.',
+      : 'The quote should be the core Hook or Reframe (8-18 words, original, emotionally clear).',
+    'The caption should deliver the rest of the framework (1-2 sentences with no markdown, completing the Hook → Problem/Bias → Reframe → Better Question/Prompt → Strong Close flow).',
     'Hashtags: 6-10 concise tags.'
   ].join('\n');
 
@@ -105,35 +113,61 @@ export async function generateContentPack({
     : prompt;
 
   try {
-    const response = await client.responses.create({
-      model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      input,
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'instagram_quote',
-          schema: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['quote', 'caption', 'hashtags'],
-            properties: {
-              quote: { type: 'string' },
-              caption: { type: 'string' },
-              hashtags: { type: 'array', items: { type: 'string' } }
+    const uniqueExclusions = uniqueQuoteExclusions(excludeQuotes);
+    const excludedKeys = new Set(uniqueExclusions.map(normalizeQuoteKey));
+    let lastDuplicateQuote = '';
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const retryInput = attempt === 0
+        ? input
+        : typeof input === 'string'
+          ? `${input}\nA previous regeneration attempt repeated an excluded idea ("${lastDuplicateQuote}"). Produce a substantially different angle and wording.`
+          : input.map((message, index) => index === input.length - 1
+            ? {
+                ...message,
+                content: [
+                  ...message.content,
+                  { type: 'input_text', text: `A previous regeneration attempt repeated an excluded idea ("${lastDuplicateQuote}"). Produce a substantially different angle and wording.` }
+                ]
+              }
+            : message);
+
+      const response = await client.responses.create({
+        model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
+        input: retryInput,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'instagram_quote',
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['quote', 'caption', 'hashtags'],
+              properties: {
+                quote: { type: 'string' },
+                caption: { type: 'string' },
+                hashtags: { type: 'array', items: { type: 'string' } }
+              }
             }
           }
         }
-      }
-    });
+      });
 
-    const raw = response.output_text;
-    const parsed = JSON.parse(raw);
-    return {
-      quote: parsed.quote,
-      caption: parsed.caption,
-      hashtags: normalizeHashtags(parsed.hashtags),
-      generationMode: 'live'
-    };
+      const parsed = JSON.parse(response.output_text);
+      const quoteKey = normalizeQuoteKey(parsed.quote);
+      const tooSimilar = uniqueExclusions.some((existing) => quoteSimilarity(parsed.quote, existing) >= 0.72);
+      if (!excludedKeys.has(quoteKey) && !tooSimilar) {
+        return {
+          quote: parsed.quote,
+          caption: parsed.caption,
+          hashtags: normalizeHashtags(parsed.hashtags),
+          generationMode: 'live'
+        };
+      }
+      lastDuplicateQuote = parsed.quote;
+    }
+
+    throw new Error('OpenAI repeated an excluded quote after multiple regeneration attempts. Please regenerate again.');
   } catch (error) {
     if (isRecoverableOpenAIError(error)) {
       if (scripturePrompt) return getDemoScriptureContent(day, excludeQuotes);
@@ -147,6 +181,41 @@ export async function generateContentPack({
     }
     throw error;
   }
+}
+
+
+function uniqueQuoteExclusions(excludeQuotes = []) {
+  const seen = new Set();
+  const result = [];
+  for (const value of excludeQuotes) {
+    const quote = String(value || '').trim();
+    const key = normalizeQuoteKey(quote);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(quote);
+  }
+  return result;
+}
+
+function normalizeQuoteKey(value = '') {
+  return String(value)
+    .toLowerCase()
+    .replace(/[“”‘’'\"`]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+
+function quoteSimilarity(left = '', right = '') {
+  const leftTokens = new Set(normalizeQuoteKey(left).split(/\s+/).filter((token) => token.length > 2));
+  const rightTokens = new Set(normalizeQuoteKey(right).split(/\s+/).filter((token) => token.length > 2));
+  if (leftTokens.size < 4 || rightTokens.size < 4) return 0;
+  let intersection = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) intersection += 1;
+  }
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  return union ? intersection / union : 0;
 }
 
 async function readPublicImageAsDataUri(publicPath) {

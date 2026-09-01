@@ -4,7 +4,8 @@ const state = {
   uploadedImage: null,
   uploadedReferencePost: null,
   uploadedSourceFile: null,
-  uploadedCartoonImage: null
+  uploadedCartoonImage: null,
+  selectedPreviewDate: null
 };
 
 const els = {
@@ -180,7 +181,10 @@ els.form.addEventListener('submit', async (event) => {
     els.status.textContent = `Agent is creating ${totalPosts} post${totalPosts === 1 ? '' : 's'}${data.sourceFileId ? ' from your source file' : ''}...`;
     const created = await api('/api/plan', { method: 'POST', body: JSON.stringify(data) });
     els.status.textContent = `${created.length} post${created.length === 1 ? '' : 's'} scheduled successfully.`;
-    state.selectedId = created[0]?.id || null;
+    if (created && created.length > 0) {
+      localStorage.setItem('currentCampaignId', created[0].campaignId);
+      state.selectedId = created[0].id;
+    }
     await loadPosts();
   } catch (error) {
     els.status.textContent = error.message;
@@ -362,10 +366,21 @@ function renderCalendar() {
 }
 
 function renderSelected() {
-  const post = state.posts.find((item) => item.id === state.selectedId) || state.posts[0];
+  let post = state.posts.find((item) => item.id === state.selectedId);
+  if (!post) {
+    const currentCampaignId = localStorage.getItem('currentCampaignId');
+    if (currentCampaignId) {
+      post = state.posts.find((item) => item.campaignId === currentCampaignId);
+    }
+  }
+  if (!post) {
+    post = state.posts[0];
+  }
+
   if (!post) {
     els.selected.className = 'empty-state';
     els.selected.textContent = 'Choose a post from the calendar.';
+    renderCampaignPreviews();
     return;
   }
   state.selectedId = post.id;
@@ -376,6 +391,7 @@ function renderSelected() {
     <img src="${post.imagePath}" alt="Generated quote card">
     <div>
       <p class="meta">${formatDate(post.scheduledAt, true)} - ${escapeHtml(statusStr)}</p>
+      <p class="meta">Content engine: ${post.generationMode === 'live' ? 'OpenAI Live' : 'Demo / fallback'}${post.regenerationCount ? ` · Regenerated ${post.regenerationCount} time${post.regenerationCount === 1 ? '' : 's'}` : ''}</p>
       <h3 class="quote">${escapeHtml(post.quote)}</h3>
       <p>${escapeHtml(post.caption)}</p>
       <p class="meta">${escapeHtml(post.creatorName || 'Rini')} - ${escapeHtml(handle)}</p>
@@ -401,14 +417,20 @@ function renderSelected() {
     button.addEventListener('click', async () => {
       button.disabled = true;
       const action = button.dataset.action;
+      const originalLabel = button.textContent;
+      if (action === 'regenerate') button.textContent = 'Regenerating Post...';
+      if (action === 'regenerate-hashtags') button.textContent = 'Regenerating Hashtags...';
       try {
         await api(`/api/posts/${post.id}/${action}`, { method: 'POST' });
       } catch (error) {
         alert(error.message);
+        button.disabled = false;
+        button.textContent = originalLabel;
       }
       await loadPosts();
     });
   });
+  renderCampaignPreviews();
 }
 
 function renderAgentReview(post) {
@@ -427,6 +449,124 @@ function renderAgentReview(post) {
       ${post.agentRationale ? `<p class="meta">${escapeHtml(post.agentRationale)}</p>` : ''}
     </div>
   `;
+}
+
+
+function renderCampaignPreviews() {
+  const container = document.querySelector('#campaignPreviewsSection');
+  const selectorEl = document.querySelector('#campaignPreviewDaySelector');
+  const listEl = document.querySelector('#campaignPreviewsList');
+  if (!container || !selectorEl || !listEl) return;
+
+  // Preview every saved post date, including posts from older campaigns.
+  const previewPosts = state.posts
+    .filter((post) => typeof post.scheduledAt === 'string' && post.scheduledAt.length >= 10)
+    .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+
+  if (previewPosts.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'flex';
+
+  const postsByDate = new Map();
+  for (const post of previewPosts) {
+    const dateKey = post.scheduledAt.slice(0, 10);
+    if (!postsByDate.has(dateKey)) postsByDate.set(dateKey, []);
+    postsByDate.get(dateKey).push(post);
+  }
+
+  // Show all dates that exist in saved post history. Newer dates appear first.
+  const previewDates = [...postsByDate.keys()].sort((a, b) => b.localeCompare(a));
+
+  // If a post is currently selected (from any campaign), keep its date selected.
+  const selectedPost = previewPosts.find((post) => post.id === state.selectedId);
+  if (selectedPost) {
+    state.selectedPreviewDate = selectedPost.scheduledAt.slice(0, 10);
+  }
+
+  if (!state.selectedPreviewDate || !postsByDate.has(state.selectedPreviewDate)) {
+    const currentCampaignId = localStorage.getItem('currentCampaignId');
+    const currentCampaignPost = currentCampaignId
+      ? previewPosts.find((post) => post.campaignId === currentCampaignId)
+      : null;
+    state.selectedPreviewDate = currentCampaignPost
+      ? currentCampaignPost.scheduledAt.slice(0, 10)
+      : previewDates[0];
+  }
+
+  selectorEl.innerHTML = `
+    <label for="campaignPreviewDateSelect">Preview date</label>
+    <select id="campaignPreviewDateSelect" class="campaign-preview-date-select">
+      ${previewDates.map((dateKey) => {
+        const firstPost = postsByDate.get(dateKey)[0];
+        const selected = dateKey === state.selectedPreviewDate ? ' selected' : '';
+        const postCount = postsByDate.get(dateKey).length;
+        return `<option value="${dateKey}"${selected}>${escapeHtml(formatPreviewDate(firstPost.scheduledAt))} (${postCount} post${postCount === 1 ? '' : 's'})</option>`;
+      }).join('')}
+    </select>
+  `;
+
+  selectorEl.querySelector('#campaignPreviewDateSelect').addEventListener('change', (event) => {
+    state.selectedPreviewDate = event.target.value;
+    const firstPostForDate = postsByDate.get(state.selectedPreviewDate)?.[0];
+    if (firstPostForDate) {
+      state.selectedId = firstPostForDate.id;
+      renderSelected();
+    } else {
+      renderCampaignPreviews();
+    }
+  });
+
+  listEl.innerHTML = '';
+  const visiblePosts = postsByDate.get(state.selectedPreviewDate) || [];
+
+  const selectedDateHeader = document.createElement('div');
+  selectedDateHeader.className = 'campaign-date-header';
+  selectedDateHeader.textContent = visiblePosts.length
+    ? formatPreviewDate(visiblePosts[0].scheduledAt)
+    : state.selectedPreviewDate;
+  listEl.appendChild(selectedDateHeader);
+
+  const postsContainer = document.createElement('div');
+  postsContainer.className = 'campaign-day-posts';
+
+  for (const post of visiblePosts) {
+    const card = document.createElement('div');
+    card.className = 'campaign-post-card';
+    if (post.id === state.selectedId) card.classList.add('active');
+
+    const postTimeStr = post.postTime || formatTime(post.scheduledAt);
+    const displayStatus = post.status === 'published-demo' ? 'published' : post.status;
+    card.innerHTML = `
+      <img class="campaign-post-thumb" src="${post.imagePath}" alt="Post thumbnail">
+      <div class="campaign-post-details">
+        <span class="campaign-post-meta">${escapeHtml(formatPreviewDate(post.scheduledAt))} · ${escapeHtml(postTimeStr)}${displayStatus ? ` · ${escapeHtml(displayStatus)}` : ''}</span>
+        <span class="campaign-post-hook">${escapeHtml(post.quote)}</span>
+      </div>
+    `;
+
+    card.addEventListener('click', () => {
+      state.selectedId = post.id;
+      state.selectedPreviewDate = post.scheduledAt.slice(0, 10);
+      renderSelected();
+    });
+
+    postsContainer.appendChild(card);
+  }
+
+  listEl.appendChild(postsContainer);
+}
+
+function formatPreviewDate(value) {
+  const date = new Date(value);
+  return date.toLocaleDateString(undefined, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
 }
 
 function readFileAsDataUrl(file) {
