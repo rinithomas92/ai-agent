@@ -4,6 +4,7 @@ dist/
 data/*.json
 data/source-files/
 !data/posts.json
+!data/prompts.json
 public/generated/
 public/uploads/
 npm-debug.log*

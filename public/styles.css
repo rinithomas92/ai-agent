@@ -162,6 +162,94 @@ textarea {
   line-height: 1.4;
 }
 
+.content-template-section {
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  background: rgba(11, 13, 24, 0.72);
+}
+
+.template-cards {
+  display: grid;
+  gap: 8px;
+}
+
+.template-card {
+  position: relative;
+  display: block;
+  margin: 0;
+  cursor: pointer;
+}
+
+.template-card input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.template-card-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 8px 8px;
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  background: rgba(11, 13, 24, 0.6);
+  transition: all 0.2s ease;
+}
+
+.template-card:hover .template-card-body {
+  background: rgba(23, 23, 42, 0.8);
+  border-color: #5b7cfa;
+}
+
+.template-card input:focus-visible + .template-card-body {
+  outline: 2px solid rgba(124, 58, 237, 0.55);
+  outline-offset: 2px;
+}
+
+.template-card input:checked + .template-card-body {
+  background: rgba(124, 58, 237, 0.15);
+  border-color: #7c3aed;
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.25);
+}
+
+.template-card-body img {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 6px;
+  border: 1px solid #2d3045;
+}
+
+.template-card-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.template-card-name {
+  font-size: 13px;
+  color: #f8fafc;
+}
+
+.template-card input:checked + .template-card-body .template-card-name::after {
+  content: " \2713";
+  color: #c4b5fd;
+}
+
+.template-card-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #8f96aa;
+}
+
 .prompt-composer {
   display: grid;
   gap: 10px;
@@ -190,6 +278,136 @@ textarea {
 .prompt-composer textarea:focus {
   outline: 2px solid rgba(124, 58, 237, 0.55);
   border-color: #8b5cf6;
+}
+
+.prompt-library {
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  background: rgba(11, 13, 24, 0.72);
+}
+
+.prompt-library .field-heading span {
+  white-space: nowrap;
+}
+
+.prompt-library-field {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #aeb7c8;
+}
+
+.prompt-library-empty {
+  margin: -2px 0 10px;
+  padding: 10px 12px;
+  border: 1px dashed #343852;
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.prompt-library-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.prompt-library-actions .ghost-button {
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.prompt-library-actions .ghost-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.prompt-library .status-line {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.prompt-details {
+  margin: -2px 0 12px;
+  padding: 12px;
+  border: 1px solid #2d3045;
+  border-radius: 8px;
+  background: rgba(8, 10, 20, 0.6);
+}
+
+.prompt-details[hidden] {
+  display: none;
+}
+
+.prompt-details.loaded {
+  border-color: #7c3aed;
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.2);
+}
+
+.prompt-details-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.prompt-loaded-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.2);
+  color: #c4b5fd;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.prompt-details-list {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 4px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.prompt-details-list dt {
+  color: #8f96aa;
+}
+
+.prompt-details-list dd {
+  margin: 0;
+  color: #dbe4f0;
+  overflow-wrap: anywhere;
+}
+
+.prompt-details-list .prompt-details-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.prompt-details-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.prompt-details-actions .ghost-button,
+.prompt-details-actions .primary-button {
+  min-height: 36px;
+  font-size: 12px;
+}
+
+@keyframes field-flash {
+  from { box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.65); }
+  to { box-shadow: 0 0 0 3px rgba(124, 58, 237, 0); }
+}
+
+.field-flash {
+  animation: field-flash 2.4s ease-out;
 }
 
 .two-col {

@@ -38,6 +38,32 @@ const els = {
   cartoonImagePreview: document.querySelector('#cartoonImagePreview')
 };
 
+// Content Template cards are radio inputs named "templateId" inside #planForm,
+// so the selected ID is sent with Generate Schedule automatically.
+const DEFAULT_TEMPLATE_ID = 'premium_quote_dark';
+
+function templateRadios() {
+  return [...els.form.querySelectorAll('input[name="templateId"]')];
+}
+
+function normalizeTemplateId(templateId) {
+  return templateRadios().some((radio) => radio.value === templateId) ? templateId : DEFAULT_TEMPLATE_ID;
+}
+
+function getSelectedTemplateId() {
+  return templateRadios().find((radio) => radio.checked)?.value || DEFAULT_TEMPLATE_ID;
+}
+
+function setSelectedTemplateId(templateId) {
+  const id = normalizeTemplateId(templateId);
+  templateRadios().forEach((radio) => { radio.checked = radio.value === id; });
+}
+
+function templateName(templateId) {
+  const radio = templateRadios().find((item) => item.value === normalizeTemplateId(templateId));
+  return radio?.closest('.template-card').querySelector('.template-card-name').textContent.trim() || templateId;
+}
+
 document.querySelector('[name="startDate"]').valueAsDate = new Date();
 renderPostTimeInputs();
 updateScheduleSummary();
@@ -177,15 +203,23 @@ els.form.addEventListener('submit', async (event) => {
       data.sourceFileId = state.uploadedSourceFile.id;
     }
 
+    // Link the schedule to the saved prompt loaded into the form (traceability only).
+    const savedPrompt = loadedSavedPrompt();
+    if (savedPrompt) {
+      data.savedPromptId = savedPrompt.id;
+      data.savedPromptName = savedPrompt.name;
+    }
+
     const totalPosts = data.days * data.postsPerDay;
     els.status.textContent = `Agent is creating ${totalPosts} post${totalPosts === 1 ? '' : 's'}${data.sourceFileId ? ' from your source file' : ''}...`;
     const created = await api('/api/plan', { method: 'POST', body: JSON.stringify(data) });
-    els.status.textContent = `${created.length} post${created.length === 1 ? '' : 's'} scheduled successfully.`;
+    els.status.textContent = `${created.length} post${created.length === 1 ? '' : 's'} scheduled successfully${savedPrompt ? ` using saved prompt: ${savedPrompt.name}` : ''}.`;
     if (created && created.length > 0) {
       localStorage.setItem('currentCampaignId', created[0].campaignId);
       state.selectedId = created[0].id;
     }
     await loadPosts();
+    if (savedPrompt) await loadPrompts(); // show the updated "Last used" date
   } catch (error) {
     els.status.textContent = error.message;
   }
@@ -212,7 +246,7 @@ async function ensureUploadedPortrait() {
 }
 
 els.clearSchedule.addEventListener('click', async () => {
-  const confirmed = window.confirm('Clear all scheduled posts? This cannot be undone.');
+  const confirmed = window.confirm('Clear all scheduled posts? Saved prompts in the Prompt Library are kept. This cannot be undone.');
   if (!confirmed) return;
 
   els.status.textContent = 'Clearing schedule...';
@@ -392,6 +426,8 @@ function renderSelected() {
     <div>
       <p class="meta">${formatDate(post.scheduledAt, true)} - ${escapeHtml(statusStr)}</p>
       <p class="meta">Content engine: ${post.generationMode === 'live' ? 'OpenAI Live' : 'Demo / fallback'}${post.regenerationCount ? ` · Regenerated ${post.regenerationCount} time${post.regenerationCount === 1 ? '' : 's'}` : ''}</p>
+      <p class="meta">Content Template: ${escapeHtml(templateName(post.templateId))}</p>
+      ${post.savedPromptName ? `<p class="meta">Saved prompt: ${escapeHtml(post.savedPromptName)}</p>` : ''}
       <h3 class="quote">${escapeHtml(post.quote)}</h3>
       <p>${escapeHtml(post.caption)}</p>
       <p class="meta">${escapeHtml(post.creatorName || 'Rini')} - ${escapeHtml(handle)}</p>
@@ -705,5 +741,233 @@ document.querySelector('#suggestCreativeBtn').addEventListener('click', async ()
   }
 });
 
+// Prompt Library: saved prompts are stored separately from posts, so they
+// survive Clear Schedule and Replace Existing Schedule.
+const promptLibrary = {
+  prompts: [],
+  select: document.querySelector('#promptLibrarySelect'),
+  selectField: document.querySelector('#promptLibrarySelectField'),
+  empty: document.querySelector('#promptLibraryEmpty'),
+  nameInput: document.querySelector('#promptNameInput'),
+  saveBtn: document.querySelector('#savePromptBtn'),
+  updateBtn: document.querySelector('#updatePromptBtn'),
+  deleteBtn: document.querySelector('#deletePromptBtn'),
+  status: document.querySelector('#promptLibraryStatus'),
+  details: document.querySelector('#promptDetails'),
+  detailsName: document.querySelector('#promptDetailsName'),
+  detailsList: document.querySelector('#promptDetailsList'),
+  loadedBadge: document.querySelector('#promptLoadedBadge'),
+  loadBtn: document.querySelector('#loadPromptBtn'),
+  scheduleAgainBtn: document.querySelector('#scheduleAgainBtn'),
+  // The saved prompt currently loaded into the planning form. Generate Schedule
+  // sends it along so posts record their source and the prompt's lastUsedAt updates.
+  loadedId: null
+};
+
+function loadedSavedPrompt() {
+  return promptLibrary.prompts.find((prompt) => prompt.id === promptLibrary.loadedId) || null;
+}
+
+function formatDateTime(value) {
+  return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function renderPromptDetails() {
+  const prompt = selectedSavedPrompt();
+  promptLibrary.details.hidden = !prompt;
+  if (!prompt) return;
+  const isLoaded = promptLibrary.loadedId === prompt.id;
+  promptLibrary.details.classList.toggle('loaded', isLoaded);
+  promptLibrary.loadedBadge.hidden = !isLoaded;
+  promptLibrary.detailsName.textContent = prompt.name;
+  const rows = [
+    ['Prompt', prompt.promptText, 'prompt-details-text'],
+    ['Category', prompt.category || '—'],
+    ['Creative direction', prompt.creativeDirection || '—'],
+    ['Template', templateName(prompt.defaultTemplate)],
+    ['Last used', prompt.lastUsedAt ? formatDateTime(prompt.lastUsedAt) : 'Not used for a schedule yet']
+  ];
+  promptLibrary.detailsList.innerHTML = rows.map(([label, value, className]) => `
+    <dt>${escapeHtml(label)}</dt><dd${className ? ` class="${className}" title="${escapeHtml(value)}"` : ''}>${escapeHtml(value)}</dd>
+  `).join('');
+}
+
+function loadSavedPrompt(prompt) {
+  applySavedPrompt(prompt);
+  promptLibrary.loadedId = prompt.id;
+  promptLibrary.status.textContent = `Loaded from Prompt Library: ${prompt.name}`;
+  renderPromptDetails();
+}
+
+function localDateString(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// Suggested start for a new campaign: today, or the day after the last scheduled
+// post if a schedule already runs into the future. The user can change it.
+function suggestedStartDate() {
+  const today = localDateString(new Date());
+  const latest = state.posts.map((post) => String(post.scheduledAt || '').slice(0, 10)).filter(Boolean).sort().pop();
+  if (!latest || latest < today) return today;
+  const [year, month, day] = latest.split('-').map(Number);
+  return localDateString(new Date(year, month - 1, day + 1));
+}
+
+function flashField(element) {
+  element.classList.remove('field-flash');
+  void element.offsetWidth; // restart the animation
+  element.classList.add('field-flash');
+}
+
+function promptFormField(name) {
+  return els.form.querySelector(`[name="${name}"]`);
+}
+
+function collectPromptFields() {
+  return {
+    name: promptLibrary.nameInput.value.trim(),
+    promptText: promptFormField('openAiPrompt').value,
+    category: promptFormField('category').value,
+    creativeDirection: promptFormField('creativePrompt').value,
+    defaultTemplate: getSelectedTemplateId()
+  };
+}
+
+function applySavedPrompt(prompt) {
+  promptFormField('openAiPrompt').value = prompt.promptText || '';
+  if (prompt.category) promptFormField('category').value = prompt.category;
+  promptFormField('creativePrompt').value = prompt.creativeDirection || '';
+  setSelectedTemplateId(prompt.defaultTemplate);
+  promptLibrary.nameInput.value = prompt.name;
+}
+
+function selectedSavedPrompt() {
+  return promptLibrary.prompts.find((prompt) => prompt.id === promptLibrary.select.value) || null;
+}
+
+function syncPromptButtons() {
+  const hasSelection = Boolean(selectedSavedPrompt());
+  promptLibrary.updateBtn.disabled = !hasSelection;
+  promptLibrary.deleteBtn.disabled = !hasSelection;
+}
+
+function renderPromptLibrary(selectedId = '') {
+  const { prompts, select, selectField, empty } = promptLibrary;
+  selectField.style.display = prompts.length ? '' : 'none';
+  if (!prompts.length) {
+    select.innerHTML = '<option value="">No saved prompts yet.</option>';
+    select.disabled = true;
+    empty.style.display = 'block';
+  } else {
+    select.innerHTML = `
+      <option value="">Select a saved prompt...</option>
+      ${prompts.map((prompt) => `<option value="${escapeHtml(prompt.id)}">${escapeHtml(prompt.name)}</option>`).join('')}
+    `;
+    select.disabled = false;
+    select.value = prompts.some((prompt) => prompt.id === selectedId) ? selectedId : '';
+    empty.style.display = 'none';
+  }
+  if (!loadedSavedPrompt()) promptLibrary.loadedId = null;
+  syncPromptButtons();
+  renderPromptDetails();
+}
+
+async function loadPrompts(selectedId = promptLibrary.select.value) {
+  try {
+    promptLibrary.prompts = await api('/api/prompts');
+  } catch (error) {
+    promptLibrary.prompts = [];
+    promptLibrary.status.textContent = `Could not load saved prompts: ${error.message}`;
+  }
+  renderPromptLibrary(selectedId);
+}
+
+// Choosing a prompt in the dropdown loads it into the form (as before). It no
+// longer marks the prompt as used; that now happens when a schedule is generated.
+promptLibrary.select.addEventListener('change', () => {
+  const prompt = selectedSavedPrompt();
+  syncPromptButtons();
+  if (!prompt) {
+    promptLibrary.loadedId = null;
+    promptLibrary.status.textContent = '';
+    renderPromptDetails();
+    return;
+  }
+  loadSavedPrompt(prompt);
+});
+
+promptLibrary.loadBtn.addEventListener('click', () => {
+  const prompt = selectedSavedPrompt();
+  if (prompt) loadSavedPrompt(prompt);
+});
+
+// Schedule Again prepares a new campaign from the saved prompt. It does not create
+// posts: the user reviews the dates/times/template and clicks Generate Schedule.
+promptLibrary.scheduleAgainBtn.addEventListener('click', () => {
+  const prompt = selectedSavedPrompt();
+  if (!prompt) return;
+  loadSavedPrompt(prompt);
+  els.daysInput.value = '30';
+  updateScheduleSummary();
+  const startDate = els.form.querySelector('[name="startDate"]');
+  startDate.value = suggestedStartDate();
+  els.status.textContent = `Ready to schedule again with "${prompt.name}": 30 days from ${startDate.value}. Check the start date, posting times and template, then click Generate Schedule.`;
+  [els.daysInput, startDate, els.postTimesContainer].forEach(flashField);
+  els.daysInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  startDate.focus({ preventScroll: true });
+});
+
+promptLibrary.saveBtn.addEventListener('click', async () => {
+  const fields = collectPromptFields();
+  if (!fields.name) {
+    promptLibrary.status.textContent = 'Enter a prompt name before saving.';
+    promptLibrary.nameInput.focus();
+    return;
+  }
+  promptLibrary.saveBtn.disabled = true;
+  try {
+    const created = await api('/api/prompts', { method: 'POST', body: JSON.stringify(fields) });
+    promptLibrary.loadedId = created.id; // the form now holds exactly this prompt
+    await loadPrompts(created.id);
+    promptLibrary.status.textContent = `Saved "${created.name}".`;
+  } catch (error) {
+    promptLibrary.status.textContent = error.message;
+  } finally {
+    promptLibrary.saveBtn.disabled = false;
+  }
+});
+
+promptLibrary.updateBtn.addEventListener('click', async () => {
+  const prompt = selectedSavedPrompt();
+  if (!prompt) return;
+  const fields = collectPromptFields();
+  if (!fields.name) fields.name = prompt.name;
+  promptLibrary.updateBtn.disabled = true;
+  try {
+    const updated = await api(`/api/prompts/${prompt.id}`, { method: 'PUT', body: JSON.stringify(fields) });
+    promptLibrary.loadedId = updated.id;
+    await loadPrompts(updated.id);
+    promptLibrary.status.textContent = `Updated "${updated.name}".`;
+  } catch (error) {
+    promptLibrary.status.textContent = error.message;
+    syncPromptButtons();
+  }
+});
+
+promptLibrary.deleteBtn.addEventListener('click', async () => {
+  const prompt = selectedSavedPrompt();
+  if (!prompt) return;
+  if (!window.confirm(`Delete saved prompt "${prompt.name}"? This does not affect scheduled posts.`)) return;
+  try {
+    await api(`/api/prompts/${prompt.id}`, { method: 'DELETE' });
+    promptLibrary.nameInput.value = '';
+    await loadPrompts('');
+    promptLibrary.status.textContent = `Deleted "${prompt.name}".`;
+  } catch (error) {
+    promptLibrary.status.textContent = error.message;
+  }
+});
+
 loadPosts();
 loadInstagramStatus();
+loadPrompts();

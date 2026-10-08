@@ -59,6 +59,44 @@
               <h2>AI Agent Plan</h2>
               <p>Let the agent plan, create, review, and schedule your branded posts.</p>
             </div>
+            <section class="content-template-section" role="radiogroup" aria-labelledby="contentTemplateHeading">
+              <div class="field-heading">
+                <span id="contentTemplateHeading">Content Template</span>
+                <small>Separate from Theme below.</small>
+              </div>
+              <div class="template-cards">
+                <label class="template-card">
+                  <input type="radio" name="templateId" value="premium_quote_dark" checked />
+                  <span class="template-card-body">
+                    <img src="/templates/premium-quote-dark.jpg" alt="" loading="lazy" />
+                    <span class="template-card-text">
+                      <strong class="template-card-name">Premium Psychology Quote</strong>
+                      <span class="template-card-desc">Elegant black background, gold accents, creator portrait, large psychology quote, signature and engagement footer.</span>
+                    </span>
+                  </span>
+                </label>
+                <label class="template-card">
+                  <input type="radio" name="templateId" value="vintage_editorial" />
+                  <span class="template-card-body">
+                    <img src="/templates/vintage-editorial.jpg" alt="" loading="lazy" />
+                    <span class="template-card-text">
+                      <strong class="template-card-name">Vintage Editorial</strong>
+                      <span class="template-card-desc">Black-and-white editorial photography with a large quote, author information, handwritten notes and premium magazine styling.</span>
+                    </span>
+                  </span>
+                </label>
+                <label class="template-card">
+                  <input type="radio" name="templateId" value="educational_infographic" />
+                  <span class="template-card-body">
+                    <img src="/templates/educational-infographic.jpg" alt="" loading="lazy" />
+                    <span class="template-card-text">
+                      <strong class="template-card-name">Educational Infographic</strong>
+                      <span class="template-card-desc">Structured educational content with headline, comparison blocks, bullet points, examples, takeaways and visual annotations.</span>
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </section>
             <label class="toggle">
               <input name="agentMode" type="checkbox" checked />
               <span>Agent Mode: strategy, daily missions, and quality review</span>
@@ -78,6 +116,40 @@
               </div>
               <textarea name="creativePrompt" rows="6" placeholder="Optional: paste a full ChatGPT-style prompt. Example: Create premium Instagram posts for women healing from emotional burnout, with elegant magazine styling, poetic quotes, and a confident feminine voice."></textarea>
             </label>
+            <section class="prompt-library" aria-labelledby="promptLibraryHeading">
+              <div class="field-heading">
+                <span id="promptLibraryHeading">Prompt Library</span>
+                <small>Saved prompts stay available after the schedule is cleared.</small>
+              </div>
+              <label for="promptLibrarySelect" id="promptLibrarySelectField" class="prompt-library-field">
+                Saved Prompts
+                <select id="promptLibrarySelect">
+                  <option value="">No saved prompts yet.</option>
+                </select>
+              </label>
+              <p id="promptLibraryEmpty" class="prompt-library-empty" style="display: none;">No saved prompts yet.</p>
+              <div id="promptDetails" class="prompt-details" hidden>
+                <div class="prompt-details-head">
+                  <strong id="promptDetailsName"></strong>
+                  <span id="promptLoadedBadge" class="prompt-loaded-badge" hidden>Loaded</span>
+                </div>
+                <dl id="promptDetailsList" class="prompt-details-list"></dl>
+                <div class="prompt-details-actions">
+                  <button type="button" id="loadPromptBtn" class="ghost-button">Load Prompt</button>
+                  <button type="button" id="scheduleAgainBtn" class="primary-button compact-primary">Schedule Again</button>
+                </div>
+              </div>
+              <label for="promptNameInput" class="prompt-library-field">
+                Prompt Name
+                <input id="promptNameInput" maxlength="120" placeholder="Example: Bible verse church post" />
+              </label>
+              <div class="prompt-library-actions">
+                <button type="button" id="savePromptBtn" class="ghost-button">Save Prompt</button>
+                <button type="button" id="updatePromptBtn" class="ghost-button" disabled>Update Prompt</button>
+                <button type="button" id="deletePromptBtn" class="ghost-button" disabled>Delete Prompt</button>
+              </div>
+              <p id="promptLibraryStatus" class="status-line"></p>
+            </section>
             <div class="prompt-composer">
               <label for="openAiPromptBox">
                 <span>ChatGPT-Style Prompt</span>

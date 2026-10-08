@@ -19,6 +19,20 @@ import { publishToInstagram, validateCredentials } from './services/instagram.js
 import { startScheduler, runDuePostsNow } from './scheduler.js';
 import { getRuntimeModes, useDemoContent, useDemoImages, useDemoPublishing } from './runtimeMode.js';
 import { getSourceFile, saveSourceFileUpload, sourceContextForPrompt } from './services/sourceFiles.js';
+import {
+  getPrompts,
+  getPromptById,
+  createPrompt,
+  updatePrompt,
+  deletePrompt,
+  isPromptNameTaken,
+  getPromptStorageStatus,
+  PromptStorageError
+} from './services/promptRepository.js';
+import { CONTENT_TEMPLATE_IDS, DEFAULT_TEMPLATE_ID, normalizeTemplateId } from './data/contentTemplates.js';
+import { renderPremiumQuoteDark } from './templates/premiumQuoteDark.js';
+import { renderVintageEditorial } from './templates/vintageEditorial.js';
+import { renderEducationalInfographic } from './templates/educationalInfographic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -36,6 +50,10 @@ app.use('/generated', express.static(path.join(root, 'public', 'generated')));
 app.use('/uploads', express.static(path.join(root, 'public', 'uploads')));
 app.use(express.static(path.join(root, 'public')));
 
+const templateIdSchema = z.enum(CONTENT_TEMPLATE_IDS, {
+  errorMap: () => ({ message: `Content template must be one of: ${CONTENT_TEMPLATE_IDS.join(', ')}.` })
+});
+
 const planSchema = z.object({
   category: z.string().min(2),
   days: z.coerce.number().int().min(1).max(50),
@@ -45,6 +63,7 @@ const planSchema = z.object({
   postTimes: z.array(z.string().regex(/^\d{2}:\d{2}$/)).max(maxPostsPerDay).optional().default([]),
   tone: z.string().min(2).default('inspirational'),
   theme: z.string().min(2).default('minimalLight'),
+  templateId: templateIdSchema.default(DEFAULT_TEMPLATE_ID),
   agentMode: z.boolean().default(true),
   agentGoal: z.string().max(1500).optional().default(''),
   creativePrompt: z.string().max(3000).optional().default(''),
@@ -58,7 +77,10 @@ const planSchema = z.object({
   animation: z.boolean().default(false),
   creatorName: z.string().min(1).default('Rini'),
   instagramHandle: z.string().min(2).default('@getholisticallyfitwithrini'),
-  uploadedImagePath: z.string().optional().nullable()
+  uploadedImagePath: z.string().optional().nullable(),
+  // Saved prompt the form was loaded from (traceability only; generation never depends on it).
+  savedPromptId: z.string().trim().max(100).optional().nullable(),
+  savedPromptName: z.string().trim().max(120).optional().nullable()
 });
 
 const uploadSchema = z.object({
@@ -93,16 +115,28 @@ const cartoonVideoSchema = z.object({
   uploadedImagePath: z.string().optional().nullable()
 });
 
+const savedPromptSchema = z.object({
+  name: z.string({ required_error: 'Prompt name is required.' }).trim().min(1, 'Prompt name is required.').max(120),
+  promptText: z.string({ required_error: 'Prompt text is required.' }).trim().min(1, 'Prompt text is required.').max(3000),
+  category: z.string().max(200).optional().default(''),
+  creativeDirection: z.string().max(3000).optional().default(''),
+  defaultTemplate: templateIdSchema.optional().default(DEFAULT_TEMPLATE_ID)
+});
+
+const savedPromptUpdateSchema = savedPromptSchema.partial().extend({
+  markUsed: z.boolean().optional()
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     schedulerTimezone: process.env.SCHEDULER_TIMEZONE || 'Asia/Kolkata',
-    runtime: getRuntimeModes()
+    runtime: { ...getRuntimeModes(), ...getPromptStorageStatus() }
   });
 });
 
 app.get('/api/runtime-status', (_req, res) => {
-  res.json(getRuntimeModes());
+  res.json({ ...getRuntimeModes(), ...getPromptStorageStatus() });
 });
 
 app.get('/api/settings', (_req, res) => {
@@ -118,6 +152,50 @@ app.put('/api/settings', (req, res) => {
 
 app.get('/api/posts', (_req, res) => {
   res.json(getPosts().sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)));
+});
+
+app.get('/api/prompts', async (_req, res, next) => {
+  try {
+    res.json(await getPrompts());
+  } catch (error) {
+    promptError(error, res, next);
+  }
+});
+
+app.post('/api/prompts', async (req, res, next) => {
+  try {
+    const input = savedPromptSchema.parse(req.body);
+    if (await isPromptNameTaken(input.name)) {
+      return res.status(409).json({ error: `A prompt named "${input.name}" already exists. Use Update Prompt instead.` });
+    }
+    res.status(201).json(await createPrompt(input));
+  } catch (error) {
+    promptError(error, res, next);
+  }
+});
+
+app.put('/api/prompts/:id', async (req, res, next) => {
+  try {
+    const input = savedPromptUpdateSchema.parse(req.body);
+    if (!(await getPromptById(req.params.id))) return res.status(404).json({ error: 'Saved prompt not found.' });
+    if (input.name && await isPromptNameTaken(input.name, req.params.id)) {
+      return res.status(409).json({ error: `A prompt named "${input.name}" already exists.` });
+    }
+    const updated = await updatePrompt(req.params.id, input);
+    if (!updated) return res.status(404).json({ error: 'Saved prompt not found.' });
+    res.json(updated);
+  } catch (error) {
+    promptError(error, res, next);
+  }
+});
+
+app.delete('/api/prompts/:id', async (req, res, next) => {
+  try {
+    if (!(await deletePrompt(req.params.id))) return res.status(404).json({ error: 'Saved prompt not found.' });
+    res.status(204).end();
+  } catch (error) {
+    promptError(error, res, next);
+  }
 });
 
 app.post('/api/uploads', async (req, res, next) => {
@@ -304,6 +382,25 @@ function validatePostContent(content, isDemo, input = {}) {
 }
 
 async function createScheduledPostCard(content, options) {
+  // Template routing. Posts without a templateId are treated as
+  // premium_quote_dark, matching how the UI already labels them.
+  // Every content template has its own renderer; the legacy renderer below is
+  // only a safety net for a template ID that has no renderer registered.
+  const templateRenderers = {
+    premium_quote_dark: renderPremiumQuoteDark,
+    vintage_editorial: renderVintageEditorial,
+    educational_infographic: renderEducationalInfographic
+  };
+  const renderTemplate = templateRenderers[normalizeTemplateId(options.templateId)];
+  if (renderTemplate) {
+    return {
+      card: await renderTemplate(content, options),
+      backgroundImagePath: null,
+      imageGenerationMode: 'svg-template',
+      imageGenerationError: ''
+    };
+  }
+
   let realBackground = null;
   let imageGenerationMode = 'svg-demo';
   let imageGenerationError = '';
@@ -387,6 +484,7 @@ app.post('/api/plan', async (req, res, next) => {
           sourceFileName: sourceFile?.filename || '',
           day: sequenceIndex + 1,
           totalDays: totalPosts,
+          templateId: input.templateId,
           excludeQuotes: created.map((post) => post.quote.toLowerCase())
         });
 
@@ -417,6 +515,7 @@ app.post('/api/plan', async (req, res, next) => {
             : ''
         ].filter(Boolean).join('\n');
         const cardResult = await createScheduledPostCard(content, {
+          templateId: input.templateId,
           category: input.category,
           styleVariant,
           theme: input.theme,
@@ -431,6 +530,8 @@ app.post('/api/plan', async (req, res, next) => {
           category: input.category,
           tone: input.tone,
           theme: input.theme,
+          templateId: input.templateId,
+          ...(input.savedPromptId ? { savedPromptId: input.savedPromptId, savedPromptName: input.savedPromptName || null } : {}),
           agentMode: input.agentMode,
           agentGoal: input.agentGoal,
           agentStrategy,
@@ -463,6 +564,7 @@ app.post('/api/plan', async (req, res, next) => {
           quote: content.quote,
           caption: content.caption,
           hashtags: content.hashtags,
+          ...(content.infographicData ? { infographicData: content.infographicData } : {}),
           generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
           imageGenerationMode: cardResult.imageGenerationMode,
           imageGenerationError: cardResult.imageGenerationError,
@@ -483,6 +585,15 @@ app.post('/api/plan', async (req, res, next) => {
     }
 
     savePosts(posts);
+    // lastUsedAt = the last time a saved prompt generated a schedule. Best effort:
+    // a deleted prompt or an unreachable Supabase must never fail the schedule.
+    if (input.savedPromptId) {
+      try {
+        await updatePrompt(input.savedPromptId, { markUsed: true });
+      } catch (error) {
+        console.warn(`Schedule created, but the saved prompt's last-used date was not updated: ${error.message}`);
+      }
+    }
     res.status(201).json(created);
   } catch (error) {
     next(error);
@@ -560,12 +671,14 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       // Exclude every current campaign quote plus every earlier version of this post.
       // This prevents Demo Mode from bouncing A↔B and gives live OpenAI a durable
       // "never reuse these versions" history across repeated regenerations/restarts.
-      excludeQuotes: buildRegenerationExclusions(posts, post)
+      excludeQuotes: buildRegenerationExclusions(posts, post),
+      templateId: post.templateId
     });
 
     validatePostContent(content, useDemoContent(), post);
 
     const cardResult = await createScheduledPostCard(content, {
+      templateId: post.templateId,
       category: post.category,
       creatorName: post.creatorName || 'Rini',
       instagramHandle: post.instagramHandle || '@getholisticallyfitwithrini',
@@ -589,6 +702,7 @@ app.post('/api/posts/:id/regenerate', async (req, res, next) => {
       quote: content.quote,
       caption: content.caption,
       hashtags: content.hashtags,
+      ...(content.infographicData ? { infographicData: content.infographicData } : {}),
       generationMode: content.generationMode || (useDemoContent() ? 'demo' : 'live'),
       imageGenerationMode: cardResult.imageGenerationMode,
       imageGenerationError: cardResult.imageGenerationError,
@@ -937,6 +1051,14 @@ function buildDefaultPostTimes(count, firstTime) {
 function isScripturePrompt(input = {}) {
   return /\b(bible|biblical|scripture|verse|psalm|proverb|church|jesus|christian|gospel)\b/i
     .test(`${input.category || ''} ${input.creativePrompt || ''} ${input.openAiPrompt || ''} ${input.quoteDescription || ''} ${input.backgroundDescription || ''}`);
+}
+
+function promptError(error, res, next) {
+  // Storage errors (Supabase unreachable, duplicate race...) carry their own status and a safe message.
+  if (error instanceof PromptStorageError) return res.status(error.status).json({ error: error.message });
+  if (error.name !== 'ZodError') return next(error);
+  const issue = error.errors[0];
+  res.status(400).json({ error: issue?.message || 'Invalid prompt.', field: issue?.path?.join('.'), details: error.errors });
 }
 
 function publicPathToFile(publicPath) {

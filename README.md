@@ -107,6 +107,23 @@ Supported formats:
 
 The app extracts readable text, stores it privately in `data/source-files`, and uses it to build the agent strategy, daily missions, quotes, captions, and hashtags. The default campaign length is 30 days, but you can change it in the form.
 
+## Prompt Library Persistence
+
+Saved prompts (Prompt Library) can live in a local file or in Supabase. Posts, schedules and images always stay local; only the Prompt Library uses Supabase.
+
+1. **Local JSON mode (default).** With no Supabase settings, prompts are stored in `data/prompts.json`, exactly as before. No network or account needed.
+2. **Supabase mode.** With `SUPABASE_URL` and a key set, prompts are read from and written to the Supabase table `saved_prompts`. Supabase is then the only source of truth: if it is unreachable, Prompt Library requests fail with a clear error and nothing is written to `data/prompts.json`.
+3. **Environment variables** (in `.env`, see `.env.example`):
+   - `SUPABASE_URL`: your project URL, e.g. `https://abcd1234.supabase.co`
+   - `SUPABASE_SERVICE_ROLE_KEY`: recommended; used server-side only and never sent to the browser
+   - `SUPABASE_ANON_KEY`: fallback if no service role key is set (needs the optional policies in `schema.sql`)
+   - `DEMO_MODE=true` ignores the Supabase settings and keeps prompts local.
+4. **Schema:** `supabase/schema.sql`.
+5. **Create the table:** in the Supabase dashboard open **SQL Editor**, paste the contents of `supabase/schema.sql`, and click **Run**. The app never runs SQL itself. Supabase mode needs Node.js 22 or newer.
+6. **Check which storage is active:** open `http://localhost:5177/api/runtime-status` and look for `"promptStorage": "supabase"` or `"promptStorage": "local"` (also shown under `runtime` in `/api/health`). A `promptStorageWarning` appears if Supabase is only partly configured. No URLs or keys are ever included.
+
+Switching to Supabase does not copy existing prompts from `data/prompts.json`; the file is left untouched, so you can switch back at any time.
+
 ## Instagram setup notes
 
 Instagram publishing uses Meta's content publishing flow: create a media container, wait for it to finish processing, then publish the container. Your Instagram account must be a professional account connected to a Facebook Page, and your app/token must have the required Instagram publishing permissions.

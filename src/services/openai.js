@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { getDemoContent } from '../data/demoContent.js';
 import { getDemoHashtags, normalizeHashtags } from '../data/hashtags.js';
 import { useDemoContent } from '../runtimeMode.js';
+import {
+  INFOGRAPHIC_JSON_SCHEMA,
+  buildDemoInfographicData,
+  infographicPromptLines,
+  normalizeInfographicData
+} from './infographicContent.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..', '..');
@@ -17,7 +23,50 @@ const fallbackQuotes = [
   'Let today be proof that softness can still have boundaries.'
 ];
 
-export async function generateContentPack({
+// Every template gets quote/caption/hashtags. educational_infographic posts also
+// get infographicData; all other templates go through generateBaseContent unchanged.
+export async function generateContentPack(params) {
+  if (params.templateId !== 'educational_infographic') {
+    return generateBaseContent(params);
+  }
+
+  const demoInfographic = (content, source) => ({
+    ...buildDemoInfographicData({
+      category: params.category,
+      quote: content.quote,
+      day: params.day,
+      totalDays: params.totalDays,
+      // Grows with every generated post and every regeneration, so a new frame is picked each time.
+      variant: (params.excludeQuotes || []).length
+    }),
+    source
+  });
+
+  if (useDemoContent()) {
+    const content = await generateBaseContent(params);
+    return { ...content, infographicData: demoInfographic(content, 'demo') };
+  }
+
+  try {
+    const content = await generateBaseContent(params, { withInfographic: true });
+    if (content.generationMode !== 'live') {
+      // OpenAI was unavailable (quota, rate limit...) and demo copy was used instead.
+      return { ...content, infographicData: demoInfographic(content, 'fallback') };
+    }
+    const { infographicData, ...rest } = content;
+    return { ...rest, infographicData: normalizeInfographicData(infographicData, demoInfographic(content, 'fallback')) };
+  } catch (error) {
+    // Keep the existing behaviour when OpenAI keeps repeating excluded quotes.
+    if (/repeated an excluded quote/i.test(error.message)) throw error;
+    // Anything else about the structured request (bad JSON, schema rejected...):
+    // generate the normal post and attach deterministic infographic data.
+    console.warn(`Structured infographic generation failed, using fallback data: ${error.message}`);
+    const content = await generateBaseContent(params);
+    return { ...content, infographicData: demoInfographic(content, 'fallback') };
+  }
+}
+
+async function generateBaseContent({
   category,
   tone,
   agentMode = false,
@@ -34,7 +83,7 @@ export async function generateContentPack({
   day,
   totalDays,
   excludeQuotes = []
-}) {
+}, { withInfographic = false } = {}) {
   const scripturePrompt = isScripturePrompt({ category, creativePrompt, openAiPrompt, quoteDescription, sourceFileContext });
   const luxuryProfilePrompt = isLuxuryProfilePrompt({ category, creativePrompt, openAiPrompt, quoteDescription, sourceFileContext });
   if (useDemoContent()) {
@@ -91,14 +140,17 @@ export async function generateContentPack({
       ? 'The user is asking for Bible verse posts. Make every post unique. Include a Bible book/chapter/verse reference in the quote itself, such as "Psalm 46:10 - Be still and know that He is God." Use respectful Christian wording, and do not invent fake references.'
       : '',
     `Tone: ${tone}. This is day ${day} of ${totalDays}.`,
-    'Return strict JSON with keys quote, caption, hashtags.',
+    withInfographic
+      ? 'Return strict JSON with keys quote, caption, hashtags, infographicData.'
+      : 'Return strict JSON with keys quote, caption, hashtags.',
     scripturePrompt
       ? 'Quote: include the Bible reference, then a short verse excerpt or faithful paraphrase. Aim for 8-28 words, never exceed 45 words, and keep it readable on an Instagram graphic.'
       : luxuryProfilePrompt
         ? 'Quote: 28-70 words, emotionally sharp psychology/self-worth style, elegant and memorable. Do not use markdown.'
       : 'The quote should be the core Hook or Reframe (8-18 words, original, emotionally clear).',
     'The caption should deliver the rest of the framework (1-2 sentences with no markdown, completing the Hook → Problem/Bias → Reframe → Better Question/Prompt → Strong Close flow).',
-    'Hashtags: 6-10 concise tags.'
+    'Hashtags: 6-10 concise tags.',
+    ...(withInfographic ? infographicPromptLines() : [])
   ].join('\n');
 
   const referenceImageDataUri = await readPublicImageAsDataUri(referencePostImagePath);
@@ -142,11 +194,12 @@ export async function generateContentPack({
             schema: {
               type: 'object',
               additionalProperties: false,
-              required: ['quote', 'caption', 'hashtags'],
+              required: withInfographic ? ['quote', 'caption', 'hashtags', 'infographicData'] : ['quote', 'caption', 'hashtags'],
               properties: {
                 quote: { type: 'string' },
                 caption: { type: 'string' },
-                hashtags: { type: 'array', items: { type: 'string' } }
+                hashtags: { type: 'array', items: { type: 'string' } },
+                ...(withInfographic ? { infographicData: INFOGRAPHIC_JSON_SCHEMA } : {})
               }
             }
           }
@@ -161,7 +214,8 @@ export async function generateContentPack({
           quote: parsed.quote,
           caption: parsed.caption,
           hashtags: normalizeHashtags(parsed.hashtags),
-          generationMode: 'live'
+          generationMode: 'live',
+          ...(withInfographic ? { infographicData: parsed.infographicData } : {})
         };
       }
       lastDuplicateQuote = parsed.quote;
